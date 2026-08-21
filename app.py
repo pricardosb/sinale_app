@@ -16,6 +16,7 @@ BAHIA_FLAG_SVG = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg
 
 st.markdown(f"""
 <style>
+    /* Marca d'água de fundo em toda a aplicação */
     .stApp {{
         background-image: linear-gradient(rgba(255, 255, 255, 0.90), rgba(255, 255, 255, 0.90)), 
                           url("{BAHIA_FLAG_SVG}") !important;
@@ -31,6 +32,27 @@ st.markdown(f"""
     .main {{
         background: transparent !important;
     }}
+
+    /* REGRA CSS PARA FORÇAR O BOTÃO VOLTAR A FLUTUAR NA TELA */
+    div.element-container:has(.btn-flutuante-anchor) + div.element-container button {{
+        position: fixed !important;
+        top: 20px !important;
+        right: 30px !important;
+        z-index: 999999 !important;
+        background-color: #CE1126 !important;
+        color: #FFFFFF !important;
+        border: 2px solid #FFFFFF !important;
+        border-radius: 20px !important;
+        padding: 0.6rem 1.4rem !important;
+        font-weight: bold !important;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.3) !important;
+        cursor: pointer !important;
+    }}
+
+    div.element-container:has(.btn-flutuante-anchor) + div.element-container button:hover {{
+        background-color: #002B7F !important;
+        transform: scale(1.05) !important;
+    }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -44,7 +66,7 @@ if "fila_modificacoes" not in st.session_state:
 if "pagina" not in st.session_state:
     st.session_state["pagina"] = "menu"
 
-# --- TELA INICIAL (MENU PRINCIPAL E TÍTULO) ---
+# --- TELA INICIAL (EXIBIDA APENAS NO MENU) ---
 if st.session_state["pagina"] == "menu":
     st.markdown(
         "<div style='text-align: center; padding: 1.2rem; background-color: #1e3c72; color: white; border-radius: 10px; margin-bottom: 2rem; box-shadow: 0 4px 10px rgba(0,0,0,0.15);'>"
@@ -85,15 +107,15 @@ if st.session_state["pagina"] == "menu":
             st.session_state["pagina"] = "menu"
             st.rerun()
 
-# --- PÁGINAS INTERNAS ---
+# --- PÁGINAS INTERNAS (TELA LIMPA + BOTÃO FLUTUANTE PERMANENTE) ---
 else:
-    col_back, _ = st.columns([1, 4])
-    with col_back:
-        if st.button("⬅️ VOLTAR AO MENU", use_container_width=True):
-            st.session_state["pagina"] = "menu"
-            st.rerun()
-    st.markdown("---")
+    # Âncora CSS + Botão que é renderizado com posição FIXA (fixed) na janela
+    st.markdown('<div class="btn-flutuante-anchor"></div>', unsafe_allow_html=True)
+    if st.button("⬅️ VOLTAR AO MENU", key="btn_voltar_flutuante"):
+        st.session_state["pagina"] = "menu"
+        st.rerun()
 
+    # Exibição exclusiva do módulo selecionado
     if st.session_state["pagina"] == "inclusao":
         inclusao.renderizar()
 
