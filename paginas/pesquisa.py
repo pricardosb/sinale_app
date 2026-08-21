@@ -1,618 +1,158 @@
-import streamlit as st
 import io
+import requests
 import pandas as pd
-import streamlit.components.v1 as components
-from utils import (
-    titulo_estilizado,
-    extrair_mes_ano_do_nome,
-    deduplicar_colunas,
-    obter_nome_coluna_por_letra,
-    formatar_datas_dataframe,
-    gerar_config_largura_colunas,
-    gerar_excel_bytes,
-    gerar_docx_bytes
-)
+import streamlit as st
+
+# --- FUNÇÕES DE INTEGRAÇÃO COM O ONEDRIVE (MICROSOFT GRAPH API) ---
+
+def obter_token_onedrive():
+    """Obtém o token de acesso OAuth2 usando as credenciais do st.secrets."""
+    try:
+        cfg = st.secrets["onedrive"]
+        url = f"https://login.microsoftonline.com/{cfg['tenant_id']}/oauth2/v2.0/token"
+        data = {
+            "client_id": cfg["client_id"],
+            "scope": "https://graph.microsoft.com/.default",
+            "client_secret": cfg["client_secret"],
+            "grant_type": "client_credentials"
+        }
+        response = requests.post(url, data=data, timeout=10)
+        if response.status_code == 200:
+            return response.json().get("access_token")
+    except Exception:
+        return None
+    return None
+
+
+def listar_arquivos_nuvem(pasta="SINALE_WEB"):
+    """Lista todos os arquivos Excel (.xlsx / .xls) presentes na pasta definida do OneDrive."""
+    token = obter_token_onedrive()
+    if not token:
+        return []
+
+    try:
+        user_id = st.secrets["onedrive"]["user_id"]
+        headers = {"Authorization": f"Bearer {token}"}
+        url = f"https://graph.microsoft.com/v1.0/users/{user_id}/drive/root:/{pasta}:/children"
+
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            itens = response.json().get("value", [])
+            # Filtra apenas arquivos Excel
+            return [
+                {
+                    "nome": item["name"],
+                    "id": item["id"],
+                    "download_url": item.get("@microsoft.graph.downloadUrl")
+                }
+                for item in itens if item["name"].lower().endswith(('.xlsx', '.xls'))
+            ]
+    except Exception as e:
+        st.error(f"Erro ao acessar pasta na nuvem: {e}")
+    return []
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def carregar_planilha_nuvem(download_url):
+    """Baixa e converte o arquivo do OneDrive diretamente para um DataFrame Pandas."""
+    try:
+        response = requests.get(download_url, timeout=15)
+        if response.status_code == 200:
+            return pd.read_excel(io.BytesIO(response.content))
+    except Exception as e:
+        st.error(f"Erro ao ler arquivo da nuvem: {e}")
+    return None
+
+
+# --- INTERFACE DA PÁGINA DE PESQUISA ---
 
 def renderizar():
-    col_v1, col_v2 = st.columns([8, 2])
-    with col_v2:
-        if st.button("⬅️ Voltar ao Menu", key="btn_voltar_pesq"):
-            st.session_state["pagina"] = "menu"
+    st.subheader("🔍 Pesquisa e Consulta de Remição de Pena")
+    st.markdown("Consulte relatórios e históricos de remição armazenados na nuvem (OneDrive).")
+
+    # Verifica se os segredos do OneDrive foram configurados
+    if "onedrive" not in st.secrets:
+        st.warning("⚠️ As credenciais do OneDrive ainda não foram configuradas em `.streamlit/secrets.toml`.")
+        st.info("Para testar localmente antes de conectar a API, use a caixa de upload manual abaixo:")
+        
+        uploaded_file = st.file_uploader("Carregar planilha local para teste", type=["xlsx", "xls"])
+        if uploaded_file:
+            df = pd.read_excel(uploaded_file)
+            exibir_interface_pesquisa(df, uploaded_file.name)
+        return
+
+    # Nome da pasta configurada ou padrão
+    nome_pasta = st.secrets["onedrive"].get("pasta_destino", "SINALE_WEB")
+
+    with st.spinner("Conectando ao OneDrive e buscando arquivos..."):
+        arquivos_nuvem = listar_arquivos_nuvem(pasta=nome_pasta)
+
+    if not arquivos_nuvem:
+        st.error(f"Nenhum arquivo Excel encontrado na pasta **'{nome_pasta}'** do OneDrive ou erro de conexão.")
+        if st.button("🔄 Tentar Novamente"):
+            st.rerun()
+        return
+
+    # Seleção do arquivo da nuvem
+    opcoes_arquivos = {arq["nome"]: arq for arq in arquivos_nuvem}
+    
+    col_sel, col_ref = st.columns([3, 1])
+    with col_sel:
+        arquivo_selecionado = st.selectbox(
+            "📁 Selecione o arquivo na nuvem para consulta:",
+            options=list(opcoes_arquivos.keys())
+        )
+    with col_ref:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🔄 Atualizar Lista", use_container_width=True):
+            st.cache_data.clear()
             st.rerun()
 
-    titulo_estilizado("Pesquisa para Remição")
-
-    if "uploader_key" not in st.session_state:
-        st.session_state["uploader_key"] = 0
-
-    st.subheader("1. Configuração de Arquivos, Abas e Campos")
-    
-    col_btn_1, col_btn_2 = st.columns(2)
-    with col_btn_1:
-        uploaded_files = st.file_uploader(
-            "1. Selecione os arquivos (.xlsx, .xls, .ods)",
-            type=["xlsx", "xls", "ods"],
-            accept_multiple_files=True,
-            key=f"search_upload_{st.session_state['uploader_key']}"
-        )
-    
-    qtd_arquivos = len(uploaded_files) if uploaded_files else 0
-    st.info(f"📊 **Quantidade de arquivos selecionados:** {qtd_arquivos}")
-
-    with col_btn_2:
-        st.markdown("<br>", unsafe_allow_html=True)
-        fazer_upload_btn = st.button("2. Fazer Upload e Configurar Abas", key="btn_fazer_upload_op3", type="primary")
-
-    if fazer_upload_btn:
-        if uploaded_files:
-            st.session_state["executar_config"] = True
-            st.session_state["rolar_apos_upload"] = True
-            st.success("Arquivos carregados com sucesso! Configure as abas abaixo:")
-        else:
-            st.error("Selecione pelo menos um arquivo antes de fazer o upload.")
-            st.session_state["executar_config"] = False
-            st.session_state["rolar_apos_upload"] = False
-
-    if uploaded_files and st.session_state.get("executar_config"):
-        settings = {}
-        for f_idx, f in enumerate(uploaded_files):
-            file_key = f"{f_idx}_{f.name}"
-            f_bytes = f.getvalue()
-            file_ext = f.name.split('.')[-1].lower()
-            
-            try:
-                engine_val = 'odf' if file_ext == 'ods' else None
-                xl = pd.ExcelFile(io.BytesIO(f_bytes), engine=engine_val)
-                sheets_available = xl.sheet_names
-            except Exception as e:
-                st.error(f"Erro ao ler o arquivo {f.name}: {e}.")
-                continue
-
-            pref_sheets = [s for s in sheets_available if any(p in s.strip().upper() for p in ["COM REMUNER", "SEM REMUNER", "DEM_COM", "DEM_SEM"])]
-
-            if pref_sheets:
-                default_sheets = pref_sheets
-                is_fallback = False
-            else:
-                default_sheets = [sheets_available[0]] if sheets_available else []
-                is_fallback = True
-
-            with st.expander(f"📁 Configurações para: Arquivo {f_idx+1} - {f.name}", expanded=True):
-                selected_sheets = st.multiselect(
-                    f"Selecione aba(s) para {f.name}",
-                    sheets_available,
-                    default=default_sheets,
-                    key=f"sheets_{file_key}_{st.session_state['uploader_key']}"
-                )
-
-                sheet_config = {}
-                for i, sheet in enumerate(selected_sheets):
-                    st.markdown(f"**Aba: `{sheet}`**")
-
-                    sheet_upper = sheet.strip().upper()
-                    if "DEM_COM" in sheet_upper:
-                        default_header = 17
-                    elif "DEM_SEM" in sheet_upper:
-                        default_header = 19
-                    elif any(p in sheet_upper for p in ["COM REMUNER", "SEM REMUNER"]):
-                        default_header = 11
-                    else:
-                        default_header = 10 if is_fallback else 11
-
-                    header_row = st.number_input(
-                        f"Linha do cabeçalho para aba '{sheet}'",
-                        value=default_header,
-                        min_value=1,
-                        key=f"head_{file_key}_{sheet}_{st.session_state['uploader_key']}"
-                    )
-
-                    try:
-                        df_preview = pd.read_excel(io.BytesIO(f_bytes), sheet_name=sheet, header=header_row - 1, nrows=0, engine=engine_val)
-                        cols_aba = [str(c).strip() for c in df_preview.columns]
-                    except:
-                        cols_aba = []
-
-                    default_col = None
-                    for c in cols_aba:
-                        c_up = str(c).strip().upper()
-                        if c_up in ["NOME DO INTERNO", "NOME DO INTERNO "]:
-                            default_col = c
-                            break
-                    if not default_col:
-                        for c in cols_aba:
-                            if str(c).strip().upper() == "NOME":
-                                default_col = c
-                                break
-                    if not default_col:
-                        for c in cols_aba:
-                            if str(c).strip().upper().startswith("NOME"):
-                                default_col = c
-                                break
-                    if not default_col:
-                        for c in cols_aba:
-                            if "NOME" in str(c).strip().upper():
-                                default_col = c
-                                break
-                    if not default_col and len(cols_aba) > 8:
-                        default_col = cols_aba[8]
-                    elif not default_col and cols_aba:
-                        default_col = cols_aba[0]
-
-                    opcoes_colunas = ["--- Não pesquisar nesta aba ---"] + cols_aba
-                    default_idx = opcoes_colunas.index(default_col) if default_col in opcoes_colunas else 0
-
-                    col_escolhida = st.selectbox(
-                        f"Selecione o campo (coluna) para a pesquisa na aba '{sheet}':",
-                        opcoes_colunas,
-                        index=default_idx,
-                        key=f"col_search_{file_key}_{sheet}_{st.session_state['uploader_key']}"
-                    )
-
-                    sheet_config[sheet] = {
-                        "header_idx": header_row - 1,
-                        "col_busca": col_escolhida if col_escolhida != "--- Não pesquisar nesta aba ---" else None
-                    }
-                    st.markdown("---")
-
-                settings[file_key] = sheet_config
-
-        btn_consolidar = st.button("🔍 Carregar e Consolidar Dados para Pesquisa", key="btn_consolidar_op3", type="primary")
-
-        if st.session_state.get("rolar_apos_upload"):
-            components.html(
-                """
-                <script>
-                    function rolarAteOFinal() {
-                        const doc = window.parent.document;
-                        const container = doc.querySelector('section.main') || doc.querySelector('[data-testid="stMain"]') || doc.querySelector('[data-testid="stAppViewContainer"]') || doc.documentElement;
-                        if (container) {
-                            container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
-                        }
-                    }
-                    setTimeout(rolarAteOFinal, 400);
-                    setTimeout(rolarAteOFinal, 800);
-                </script>
-                """,
-                height=0
-            )
-            st.session_state["rolar_apos_upload"] = False
-
-        if btn_consolidar:
-            all_results = []
-            for f_idx, f in enumerate(uploaded_files):
-                file_key = f"{f_idx}_{f.name}"
-                f_bytes = f.getvalue()
-                file_ext = f.name.split('.')[-1].lower()
-                engine_val = 'odf' if file_ext == 'ods' else None
-                
-                try:
-                    xl = pd.ExcelFile(io.BytesIO(f_bytes), engine=engine_val)
-                    mes_ano_arquivo = extrair_mes_ano_do_nome(f.name)
-                except:
-                    mes_ano_arquivo = "SEM MÊS/ANO"
-
-                file_cfg = settings.get(file_key, {})
-                for sheet, cfg in file_cfg.items():
-                    try:
-                        df_tmp = pd.read_excel(io.BytesIO(f_bytes), sheet_name=sheet, header=cfg["header_idx"], engine=engine_val)
-                        df_tmp.columns = [str(c).strip() for c in df_tmp.columns]
-                        df_tmp.columns = deduplicar_colunas(df_tmp.columns)
-
-                        col_pedida = cfg.get("col_busca")
-                        target_col = None
-                        if col_pedida:
-                            for c in df_tmp.columns:
-                                if str(c).strip().upper() == str(col_pedida).strip().upper():
-                                    target_col = c
-                                    break
-                        if not target_col:
-                            for c in df_tmp.columns:
-                                if "NOME DO INTERNO" in str(c).strip().upper():
-                                    target_col = c
-                                    break
-                        if not target_col:
-                            for c in df_tmp.columns:
-                                if "NOME" in str(c).strip().upper():
-                                    target_col = c
-                                    break
-                        if not target_col and len(df_tmp.columns) > 8:
-                            target_col = df_tmp.columns[8]
-                        elif not target_col and len(df_tmp.columns) > 0:
-                            target_col = df_tmp.columns[0]
-
-                        if target_col and target_col in df_tmp.columns:
-                            colunas_originais = list(df_tmp.columns)
-
-                            df_tmp["Campo Pesquisado"] = target_col
-
-                            val_nome = df_tmp[target_col].astype(str).str.strip()
-                            df_tmp["Nome (Visualização)"] = val_nome
-                            df_tmp["NOME_LIMPO"] = val_nome.str.upper()
-
-                            df_tmp = df_tmp[~df_tmp["NOME_LIMPO"].isin(['', 'NAN', 'NONE', '0', 'NAT', 'NC', 'N/C'])].copy()
-
-                            aba_upper = sheet.strip().upper()
-                            is_dem_com = "DEM_COM" in aba_upper
-                            is_dem_sem = "DEM_SEM" in aba_upper
-                            is_com_remuner = "COM REMUNER" in aba_upper
-                            is_sem_remuner = "SEM REMUNER" in aba_upper
-                            col_f = obter_nome_coluna_por_letra(df_tmp, colunas_originais, 'F')
-                            
-                            usar_padrao_antigo = False
-                            usar_dem_sem_antigo = False
-
-                            is_03_a_05_2023 = False
-                            is_06_a_07_2023 = False
-                            is_08_2023 = False
-
-                            if mes_ano_arquivo != "SEM MÊS/ANO":
-                                try:
-                                    mes_str, ano_str = mes_ano_arquivo.split('/')
-                                    mes_val, ano_val = int(mes_str), int(ano_str)
-                                    
-                                    if ano_val == 2023 and mes_val in [3, 4, 5]:
-                                        is_03_a_05_2023 = True
-                                    elif ano_val == 2023 and mes_val in [6, 7]:
-                                        is_06_a_07_2023 = True
-                                    elif ano_val == 2023 and mes_val == 8:
-                                        is_08_2023 = True
-
-                                    if ano_val < 2025 or (ano_val == 2025 and mes_val < 9):
-                                        usar_padrao_antigo = True
-
-                                    if ano_val < 2019 or (ano_val == 2019 and mes_val < 11):
-                                        usar_dem_sem_antigo = True
-                                except Exception:
-                                    pass
-
-                            def extrair_dados_e_categoria(row):
-                                if is_03_a_05_2023:
-                                    if is_dem_com or is_com_remuner:
-                                        cat = "COM REMUNERAÇÃO"
-                                        letras = ["I", "B", "T", "V", "W", "X", "Y"]
-                                    elif is_dem_sem or is_sem_remuner:
-                                        cat = "SEM REMUNERAÇÃO"
-                                        letras = ["J", "B", "S", "U", "V", "W", "X"]
-                                    else:
-                                        val_f = row[col_f] if (col_f and col_f in row) else None
-                                        is_sim = str(val_f).strip().upper() == "SIM" if pd.notna(val_f) else False
-                                        cat = "COM REMUNERAÇÃO" if is_sim else "SEM REMUNERAÇÃO"
-                                        letras = ["I", "B", "T", "V", "W", "X", "Y"] if is_sim else ["J", "B", "S", "U", "V", "W", "X"]
-                                        
-                                elif is_06_a_07_2023:
-                                    if is_dem_com or is_com_remuner:
-                                        cat = "COM REMUNERAÇÃO"
-                                        letras = ["I", "B", "U", "W", "X", "Y", "Z"]
-                                    elif is_dem_sem or is_sem_remuner:
-                                        cat = "SEM REMUNERAÇÃO"
-                                        letras = ["J", "B", "S", "V", "W", "X", "Y"]
-                                    else:
-                                        val_f = row[col_f] if (col_f and col_f in row) else None
-                                        is_sim = str(val_f).strip().upper() == "SIM" if pd.notna(val_f) else False
-                                        cat = "COM REMUNERAÇÃO" if is_sim else "SEM REMUNERAÇÃO"
-                                        letras = ["I", "B", "U", "W", "X", "Y", "Z"] if is_sim else ["J", "B", "S", "V", "W", "X", "Y"]
-
-                                elif is_08_2023:
-                                    if is_dem_com or is_com_remuner:
-                                        cat = "COM REMUNERAÇÃO"
-                                        letras = ["I", "B", "R", "T", "U", "V", "W"]
-                                    elif is_dem_sem or is_sem_remuner:
-                                        cat = "SEM REMUNERAÇÃO"
-                                        letras = ["I", "B", "Q", "S", "T", "U", "V"]
-                                    else:
-                                        val_f = row[col_f] if (col_f and col_f in row) else None
-                                        is_sim = str(val_f).strip().upper() == "SIM" if pd.notna(val_f) else False
-                                        cat = "COM REMUNERAÇÃO" if is_sim else "SEM REMUNERAÇÃO"
-                                        letras = ["I", "B", "R", "T", "U", "V", "W"] if is_sim else ["I", "B", "Q", "S", "T", "U", "V"]
-
-                                else:
-                                    if is_dem_com:
-                                        cat = "COM REMUNERAÇÃO"
-                                        letras = ["I", "B", None, "S", "T", "U", "V"]
-
-                                    elif is_dem_sem:
-                                        cat = "SEM REMUNERAÇÃO"
-                                        if usar_dem_sem_antigo:
-                                            letras = ["I", "B", "Y", "R", "S", "T", "U"]
-                                        else:
-                                            letras = ["I", "B", "Y", "S", "T", "U", "V"]
-
-                                    elif is_com_remuner:
-                                        cat = "COM REMUNERAÇÃO"
-                                        if usar_padrao_antigo:
-                                            letras = ["I", "B", "Q", "S", "T", "U", "V"]
-                                        else:
-                                            letras = ["B", "I", "J", "T", "U", "V", "W"]
-
-                                    elif is_sem_remuner:
-                                        cat = "SEM REMUNERAÇÃO"
-                                        letras = ["I", "B", "W", "R", "S", "T", "U"]
-
-                                    else:
-                                        val_f = row[col_f] if (col_f and col_f in row) else None
-                                        is_sim = str(val_f).strip().upper() == "SIM" if pd.notna(val_f) else False
-
-                                        cat = "COM REMUNERAÇÃO" if is_sim else "SEM REMUNERAÇÃO"
-                                        letras = ["J", "C", "X", "S", "T", "U", "V"]
-
-                                row_vals = {
-                                    "Categoria_Aba": cat,
-                                    "LABEL_EXIBICAO": f"{mes_ano_arquivo} - {sheet}"
-                                }
-                                for idx_p, let in enumerate(letras):
-                                    if let is None:
-                                        val = ""
-                                        header_title = ""
-                                    else:
-                                        col_n = obter_nome_coluna_por_letra(df_tmp, colunas_originais, let)
-                                        val = row[col_n] if col_n and col_n in row else None
-                                        header_title = str(col_n) if col_n else f"Campo {idx_p+1}"
-                                    row_vals[f"POS_{idx_p}"] = val
-                                    row_vals[f"HEADER_{idx_p}"] = header_title
-
-                                return pd.Series(row_vals)
-
-                            res_df = df_tmp.apply(extrair_dados_e_categoria, axis=1)
-                            df_tmp["MÊS/ANO"] = res_df["LABEL_EXIBICAO"]
-
-                            df_processed = pd.concat([
-                                df_tmp[[
-                                    "MÊS/ANO",
-                                    "Campo Pesquisado",
-                                    "Nome (Visualização)",
-                                    "NOME_LIMPO"
-                                ]],
-                                res_df
-                            ], axis=1)
-                            all_results.append(df_processed)
-                    except Exception as e:
-                        st.error(f"Erro ao ler {f.name} - Aba {sheet}: {e}")
-
-            if all_results:
-                st.session_state["pesquisa_df"] = pd.concat(all_results, ignore_index=True)
-                st.success(f"Dados consolidados com sucesso! **{len(st.session_state['pesquisa_df'])}** registros carregados.")
-            else:
-                st.warning("Nenhum dado encontrado com as configurações informadas.")
-                st.session_state["pesquisa_df"] = None
-
-    if st.session_state.get("pesquisa_df") is not None:
-        df_pesq = st.session_state["pesquisa_df"]
-        st.markdown("---")
-        st.subheader("🔍 Filtros de Visualização e Busca")
-
-        col_ord1, col_ord2 = st.columns([2, 2])
-        with col_ord1:
-            ordem_escolhida = st.radio(
-                "📅 Ordenação por Mês/Ano:",
-                ["Crescente (Antigo ➔ Recente)", "Decrescente (Recente ➔ Antigo)"],
-                horizontal=True,
-                key=f"ordem_radio_{st.session_state['uploader_key']}"
-            )
+    if arquivo_selecionado:
+        dados_arquivo = opcoes_arquivos[arquivo_selecionado]
         
-        is_ascending = True if "Crescente" in ordem_escolhida else False
+        with st.spinner(f"Carregando **{arquivo_selecionado}**..."):
+            df = carregar_planilha_nuvem(dados_arquivo["download_url"])
 
-        nomes_disponiveis = sorted(df_pesq["Nome (Visualização)"].dropna().unique())
-        nomes_selecionados = st.multiselect(
-            "🔍 Digite para pesquisar e selecione o(s) nome(s):",
-            options=nomes_disponiveis,
-            key=f"busca_nomes_{st.session_state['uploader_key']}"
-        )
-
-        df_view = df_pesq.copy()
-        if nomes_selecionados:
-            df_view = df_view[df_view["Nome (Visualização)"].isin(nomes_selecionados)]
-
-        st.metric("Total de Registros Encontrados", len(df_view))
-
-        if not df_view.empty:
-            def extrair_chave_data(val):
-                try:
-                    data_str = str(val).split(' - ')[0].strip()
-                    if data_str == "SEM MÊS/ANO":
-                        return 999999 if is_ascending else -1
-                    m, y = data_str.split('/')
-                    return int(y) * 100 + int(m)
-                except:
-                    return 999999 if is_ascending else -1
-            
-            df_view['chave_ordenacao'] = df_view['MÊS/ANO'].apply(extrair_chave_data)
-            df_view = df_view.sort_values(by=['chave_ordenacao'], ascending=is_ascending).drop(columns=['chave_ordenacao'])
-
-            df_display_all = formatar_datas_dataframe(df_view)
-
-            def formatar_sem_decimal(val):
-                if pd.isna(val) or str(val).strip() in ["", "nan", "None"]:
-                    return ""
-                try:
-                    num = float(val)
-                    return str(int(round(num)))
-                except (ValueError, TypeError):
-                    return str(val).strip()
-
-            def conv_num(val):
-                try:
-                    v_str = str(val).replace(',', '.').strip()
-                    return float(v_str) if v_str not in ["", "nan", "None"] else 0.0
-                except:
-                    return 0.0
-
-            grupos_categorias = [
-                ("🟢 COM REMUNERAÇÃO", "COM REMUNERAÇÃO", "com_rem"),
-                ("🟡 SEM REMUNERAÇÃO", "SEM REMUNERAÇÃO", "sem_rem")
-            ]
-
-            mapa_meses = {
-                "01": "JAN", "1": "JAN", "02": "FEV", "2": "FEV",
-                "03": "MAR", "3": "MAR", "04": "ABR", "4": "ABR",
-                "05": "MAI", "5": "MAI", "06": "JUN", "6": "JUN",
-                "07": "JUL", "7": "JUL", "08": "AGO", "8": "AGO",
-                "09": "SET", "9": "SET", "10": "OUT", "11": "NOV", "12": "DEZ"
-            }
-            ordem_meses_siglas = ["JAN", "FEV", "MAR", "ABR", "MAI", "JUN", "JUL", "AGO", "SET", "OUT", "NOV", "DEZ"]
-
-            todos_dados_exportacao = []
-
-            for titulo_grupo, cat_key, prefixo_key in grupos_categorias:
-                df_grupo = df_display_all[df_display_all["Categoria_Aba"] == cat_key]
-
-                if not df_grupo.empty:
-                    pos_cols = [c for c in df_grupo.columns if str(c).startswith("POS_")]
-                    pos_cols.sort(key=lambda x: int(x.split("_")[1]))
-
-                    cabecalhos_padrao = ["NOME", "ORGANIZ", "FUNÇÃO", "ENTRADA", "SAIDA", "PREV", "REAL"]
-                    rename_map = {}
-                    
-                    for idx_p, pos_col in enumerate(pos_cols):
-                        if idx_p < len(cabecalhos_padrao):
-                            rename_map[pos_col] = cabecalhos_padrao[idx_p]
-                        else:
-                            rename_map[pos_col] = f"Campo {idx_p+1}"
-
-                    cols_exibir = ["MÊS/ANO"] + pos_cols
-                    df_render = df_grupo[cols_exibir].rename(columns=rename_map)
-
-                    if "REAL" in df_render.columns:
-                        df_render["REAL"] = df_render["REAL"].apply(formatar_sem_decimal)
-
-                    st.markdown(f"### {titulo_grupo} ({len(df_render)} registro(s))")
-
-                    key_select = f"select_all_{prefixo_key}"
-                    if key_select not in st.session_state:
-                        st.session_state[key_select] = False
-
-                    col_b1, col_b2, _ = st.columns([1, 1, 4])
-                    with col_b1:
-                        if st.button("✅ Marcar Todos", key=f"btn_marcar_{prefixo_key}_{st.session_state['uploader_key']}"):
-                            st.session_state[key_select] = True
-                            st.rerun()
-                    with col_b2:
-                        if st.button("❌ Desmarcar Todos", key=f"btn_desmarcar_{prefixo_key}_{st.session_state['uploader_key']}"):
-                            st.session_state[key_select] = False
-                            st.rerun()
-
-                    df_render.insert(0, "SELECIONAR?", st.session_state[key_select])
-
-                    col_config_conteudo = gerar_config_largura_colunas(df_render, df_render.columns.tolist())
-                    col_config_conteudo["SELECIONAR?"] = st.column_config.CheckboxColumn("SELECIONAR?", default=False)
-
-                    df_editado_res = st.data_editor(
-                        df_render,
-                        column_config=col_config_conteudo,
-                        use_container_width=True,
-                        hide_index=True,
-                        key=f"editor_res_{prefixo_key}_{st.session_state['uploader_key']}"
-                    )
-
-                    selecionados_grupo = df_editado_res[df_editado_res["SELECIONAR?"] == True]
-                    
-                    if not selecionados_grupo.empty:
-                        st.markdown("---")
-                        st.markdown(f"### 📋 Espaço de Visualização dos Registros Selecionados — {titulo_grupo}")
-                        
-                        grupos_nome = selecionados_grupo.groupby("NOME", sort=False)
-
-                        for nome_interno, df_nome_sel in grupos_nome:
-                            organiz_val = ", ".join([str(v) for v in df_nome_sel["ORGANIZ"].dropna().unique() if str(v).strip() != ""])
-                            funcao_val = ", ".join([str(v) for v in df_nome_sel["FUNÇÃO"].dropna().unique() if str(v).strip() != ""])
-                            saida_val = ", ".join([str(v) for v in df_nome_sel["SAIDA"].dropna().unique() if str(v).strip() != ""])
-                            
-                            soma_real = sum(conv_num(v) for v in df_nome_sel["REAL"])
-                            total_dias_nome = int(round(soma_real))
-
-                            st.markdown(
-                                f"**NOME:** {nome_interno} &nbsp;|&nbsp; "
-                                f"**ORGANIZAÇÃO:** {organiz_val if organiz_val else 'N/A'} &nbsp;|&nbsp; "
-                                f"**FUNÇÃO:** {funcao_val if funcao_val else 'N/A'} &nbsp;|&nbsp; "
-                                f"**REMUNERAÇÃO:** {cat_key} &nbsp;|&nbsp; "
-                                f"**SAÍDA:** {saida_val if saida_val else 'N/A'}"
-                            )
-                            
-                            matrix_data = []
-                            for _, r_row in df_nome_sel.iterrows():
-                                raw_mes_ano = str(r_row.get("MÊS/ANO", ""))
-                                data_mes_ano = raw_mes_ano.split(" - ")[0] if " - " in raw_mes_ano else raw_mes_ano
-                                
-                                mes_sigla, ano_str = "N/A", "N/A"
-                                if "/" in data_mes_ano:
-                                    parts = data_mes_ano.split("/")
-                                    if len(parts) == 2:
-                                        mes_num, ano_str = parts[0].strip(), parts[1].strip()
-                                        mes_sigla = mapa_meses.get(mes_num, mes_num)
-                                
-                                val_real = formatar_sem_decimal(r_row.get("REAL", ""))
-                                
-                                matrix_data.append({
-                                    "ANO": ano_str,
-                                    "MÊS": mes_sigla,
-                                    "REAL": val_real
-                                })
-                            
-                            df_pivot = pd.DataFrame()
-                            if matrix_data:
-                                df_mat = pd.DataFrame(matrix_data)
-                                
-                                df_pivot = df_mat.pivot_table(
-                                    index="ANO",
-                                    columns="MÊS",
-                                    values="REAL",
-                                    aggfunc=lambda x: " / ".join([str(v) for v in x if pd.notna(v) and str(v).strip() != ""])
-                                ).fillna("")
-                                
-                                cols_meses = sorted(df_pivot.columns, key=lambda m: ordem_meses_siglas.index(m) if m in ordem_meses_siglas else 99)
-                                df_pivot = df_pivot[cols_meses]
-                                
-                                st.dataframe(df_pivot, use_container_width=True)
-                            
-                            st.markdown(f"**Total de Dias:** {total_dias_nome}")
-                            st.markdown("<br>", unsafe_allow_html=True)
-
-                            todos_dados_exportacao.append({
-                                "nome": nome_interno,
-                                "organiz": organiz_val if organiz_val else "N/A",
-                                "funcao": funcao_val if funcao_val else "N/A",
-                                "remuneracao": cat_key,
-                                "saida": saida_val if saida_val else "N/A",
-                                "pivot_df": df_pivot,
-                                "total_dias": total_dias_nome
-                            })
-
-                        total_marcados = len(selecionados_grupo)
-                        st.caption(f"📌 **{total_marcados}** item(ns) selecionado(s) nesta tabela.")
-                        st.markdown("---")
-
-            if todos_dados_exportacao:
-                st.markdown("### 📥 Baixar Relatório Unificado (Todos os Selecionados)")
-                st.info(f"O relatório gerado conterá **{len(todos_dados_exportacao)}** registro(s) selecionado(s) nas tabelas acima.")
-
-                col_dl1, col_dl2 = st.columns(2)
-                
-                excel_bytes = gerar_excel_bytes(todos_dados_exportacao)
-                with col_dl1:
-                    st.download_button(
-                        label="📊 Baixar Excel Consolidador (.xlsx)",
-                        data=excel_bytes,
-                        file_name="salvamento_remicao_consolidado.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key=f"btn_dl_xlsx_unico_{st.session_state['uploader_key']}",
-                        type="primary"
-                    )
-                
-                docx_bytes = gerar_docx_bytes(todos_dados_exportacao)
-                with col_dl2:
-                    st.download_button(
-                        label="📄 Baixar Word Consolidador (.docx)",
-                        data=docx_bytes,
-                        file_name="salvamento_remicao_consolidado.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        key=f"btn_dl_docx_unico_{st.session_state['uploader_key']}",
-                        type="primary"
-                    )
-                st.markdown("---")
+        if df is not None and not df.empty:
+            exibir_interface_pesquisa(df, arquivo_selecionado)
         else:
-            st.info("ℹ️ Nenhum registro selecionado ou encontrado na pesquisa.")
-            
-    if st.button("🗑️ Limpar Tudo", key="btn_limpar_tudo_op3"):
-        chave_atual = st.session_state.get("uploader_key", 0) + 1
-        st.session_state.clear()
-        st.session_state["uploader_key"] = chave_atual
-        st.rerun()
+            st.warning("O arquivo selecionado está vazio ou não pôde ser lido.")
+
+
+def exibir_interface_pesquisa(df: pd.DataFrame, nome_arquivo: str):
+    """Renderiza os filtros e a tabela de dados pesquisada."""
+    st.success(f"Planilha **{nome_arquivo}** carregada ({len(df)} registros).", icon="📊")
+
+    st.markdown("---")
+    
+    # Campo de Busca Geral
+    termo_busca = st.text_input("🔎 Digite para pesquisar (Nome, CPF, Matrícula, Processo, etc.):", "")
+
+    # Filtro dinâmico
+    if termo_busca:
+        # Filtra em todas as colunas de texto
+        mascara = df.astype(str).apply(
+            lambda col: col.str.contains(termo_busca, case=False, na=False)
+        ).any(axis=1)
+        df_filtrado = df[mascara]
+    else:
+        df_filtrado = df
+
+    # Exibição dos resultados
+    col_m1, col_m2 = st.columns(2)
+    col_m1.metric("Total de Registros Encontrados", len(df_filtrado))
+    
+    # Tenta somar a coluna de dias remidos se existir
+    colunas_dias = [c for c in df_filtrado.columns if "dia" in c.lower() or "remi" in c.lower()]
+    if colunas_dias:
+        col_dias = colunas_dias[0]
+        total_dias = pd.to_numeric(df_filtrado[col_dias], errors='coerce').sum()
+        col_m2.metric(f"Total de {col_dias}", f"{int(total_dias) if pd.notnull(total_dias) else 0} dias")
+
+    # Tabela Interativa
+    st.dataframe(
+        df_filtrado,
+        use_container_width=True,
+        hide_index=True
+    )
