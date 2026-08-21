@@ -24,59 +24,71 @@ def conectar_google_drive():
         return None
 
 
-def listar_arquivos_recursivo(service, folder_id, caminho_atual=""):
-    """Percorre recursivamente a pasta e todas as subpastas encontrando planilhas."""
+@st.cache_data(ttl=300, show_spinner=False)
+def mapear_estrutura_pastas(folder_id):
+    """Varre o Drive e retorna um dicionário com todos os caminhos de pastas e seus respectivos IDs."""
+    service = conectar_google_drive()
+    if not service:
+        return {}
+
+    mapa_pastas = {"📂 [Pasta Principal]": folder_id}
+
+    def buscar_subpastas(parent_id, caminho_pai):
+        mime_folder = "application/vnd.google-apps.folder"
+        try:
+            query = f"'{parent_id}' in parents and mimeType = '{mime_folder}' and trashed = false"
+            results = service.files().list(
+                q=query,
+                fields="files(id, name)",
+                pageSize=100
+            ).execute()
+
+            for subpasta in results.get("files", []):
+                caminho_completo = f"{caminho_pai} / {subpasta['name']}"
+                mapa_pastas[f"📁 {caminho_completo}"] = subpasta["id"]
+                # Busca recursiva para sub-subpastas
+                buscar_subpastas(subpasta["id"], caminho_completo)
+        except Exception as e:
+            st.warning(f"Erro ao mapear a pasta {caminho_pai}: {e}")
+
+    buscar_subpastas(folder_id, "Principal")
+    return mapa_pastas
+
+
+def listar_arquivos_da_pasta(folder_id):
+    """Lista apenas as planilhas localizadas diretamente dentro da pasta selecionada."""
+    service = conectar_google_drive()
+    if not service:
+        return []
+
     extensoes_validas = ('.xlsx', '.xls', '.ods', '.csv')
     mime_google_sheets = "application/vnd.google-apps.spreadsheet"
-    mime_folder = "application/vnd.google-apps.folder"
-
-    arquivos_encontrados = []
 
     try:
         query = f"'{folder_id}' in parents and trashed = false"
         results = service.files().list(
             q=query,
             fields="files(id, name, mimeType)",
-            pageSize=1000
+            pageSize=100
         ).execute()
 
         itens = results.get("files", [])
-
+        
+        arquivos = []
         for item in itens:
-            mime = item["mimeType"]
-            nome = item["name"]
+            nome_lc = item["name"].lower()
+            if nome_lc.endswith(extensoes_validas) or item["mimeType"] == mime_google_sheets:
+                arquivos.append(item)
 
-            if mime == mime_folder:
-                # É uma subpasta -> Entra e busca recursivamente
-                novo_caminho = f"{caminho_atual}{nome} / "
-                sub_itens = listar_arquivos_recursivo(service, item["id"], novo_caminho)
-                arquivos_encontrados.extend(sub_itens)
-            else:
-                # É um arquivo -> Verifica se é planilha
-                nome_lc = nome.lower()
-                if nome_lc.endswith(extensoes_validas) or mime == mime_google_sheets:
-                    nome_exibicao = f"📁 {caminho_atual}{nome}" if caminho_atual else f"📄 {nome}"
-                    item_copia = item.copy()
-                    item_copia["nome_exibicao"] = nome_exibicao
-                    arquivos_encontrados.append(item_copia)
-
+        return arquivos
     except Exception as e:
-        st.warning(f"Aviso ao varrer subpasta ({caminho_atual}): {e}")
-
-    return arquivos_encontrados
-
-
-def listar_arquivos_drive(folder_id):
-    """Função principal que inicia a varredura na pasta raiz configurada."""
-    service = conectar_google_drive()
-    if not service:
+        st.error(f"Erro ao buscar arquivos na pasta selecionada: {e}")
         return []
-    return listar_arquivos_recursivo(service, folder_id)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
 def carregar_planilha_drive(file_id, mime_type, nome_arquivo):
-    """Baixa e interpreta planilhas nos formatos .xlsx, .xls, .ods, .csv e Google Sheets."""
+    """Baixa e interpreta a planilha escolhida."""
     service = conectar_google_drive()
     if not service:
         return None
@@ -84,7 +96,6 @@ def carregar_planilha_drive(file_id, mime_type, nome_arquivo):
     try:
         nome_lc = nome_arquivo.lower()
 
-        # Google Sheets nativo -> Exporta como XLSX
         if mime_type == "application/vnd.google-apps.spreadsheet":
             request = service.files().export_media(
                 fileId=file_id,
@@ -101,7 +112,6 @@ def carregar_planilha_drive(file_id, mime_type, nome_arquivo):
 
         fh.seek(0)
 
-        # Leitura conforme a extensão
         if nome_lc.endswith('.csv'):
             return pd.read_csv(fh)
         elif nome_lc.endswith('.ods'):
@@ -110,72 +120,74 @@ def carregar_planilha_drive(file_id, mime_type, nome_arquivo):
             return pd.read_excel(fh)
 
     except Exception as e:
-        st.error(f"Erro ao processar o arquivo **{nome_arquivo}**: {e}")
+        st.error(f"Erro ao carregar a planilha **{nome_arquivo}**: {e}")
         return None
 
 
 def renderizar():
     st.subheader("🔍 Pesquisa e Consulta de Remição de Pena")
-    st.markdown("Consulte relatórios e históricos armazenados na pasta e subpastas do **Google Drive**.")
+    st.markdown("Navegue pelas pastas do **Google Drive** e selecione a planilha desejada.")
 
-    # 1. Verifica credenciais
     if "gcp_service_account" not in st.secrets:
-        st.error("❌ As credenciais do Google Drive não foram encontradas no `st.secrets`.")
+        st.error("❌ Credenciais do Google Drive não configuradas no `st.secrets`.")
         return
 
-    # 2. Obtém o ID da pasta principal
-    folder_id = st.secrets["gcp_service_account"].get("pasta_id")
-    if not folder_id:
-        st.error("❌ O parâmetro `pasta_id` não foi configurado em `[gcp_service_account]` no Secrets.")
+    root_folder_id = st.secrets["gcp_service_account"].get("pasta_id")
+    if not root_folder_id:
+        st.error("❌ Parâmetro `pasta_id` ausente no `st.secrets`.")
         return
 
-    # 3. Busca arquivos em todas as pastas e subpastas
-    with st.spinner("Varrendo pasta principal e subpastas no Google Drive..."):
-        arquivos = listar_arquivos_drive(folder_id)
+    # 1º PASSO: Mapear e selecionar a Pasta / Subpasta
+    with st.spinner("Mapeando pastas e subpastas no Google Drive..."):
+        mapa_pastas = mapear_estrutura_pastas(root_folder_id)
 
-    if not arquivos:
-        st.warning("⚠️ Nenhuma planilha foi encontrada na pasta principal ou nas subpastas.")
-        st.info(
-            "**Checklist de Verificação:**\n"
-            "1. Certifique-se de que a pasta principal foi compartilhada com o e-mail:\n"
-            "   `fluxo-dados-web-cosis@cpfs-web.iam.gserviceaccount.com` (como Editor).\n"
-            "2. Verifique se existem arquivos com extensão `.xlsx`, `.xls`, `.ods`, `.csv` ou Planilhas do Google."
+    if not mapa_pastas:
+        st.warning("Nenhuma pasta foi encontrada ou permissão negada.")
+        return
+
+    col_pasta, col_btn = st.columns([3, 1])
+    with col_pasta:
+        pasta_selecionada_nome = st.selectbox(
+            "📂 1. Escolha a Pasta / Subpasta:",
+            options=list(mapa_pastas.keys())
         )
-        if st.button("🔄 Recarregar Pasta"):
-            st.rerun()
-        return
-
-    # 4. Ordena e mapeia para a seleção
-    arquivos_ordenados = sorted(arquivos, key=lambda x: x["nome_exibicao"])
-    opcoes = {arq["nome_exibicao"]: arq for arq in arquivos_ordenados}
-
-    col_sel, col_ref = st.columns([3, 1])
-    with col_sel:
-        selecao_formatada = st.selectbox(
-            "📁 Selecione a planilha (organizadas por subpasta):",
-            options=list(opcoes.keys())
-        )
-    with col_ref:
+    with col_btn:
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("🔄 Atualizar Lista", use_container_width=True):
+        if st.button("🔄 Atualizar Pastas", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
 
-    # 5. Carregamento e exibição
-    if selecao_formatada:
-        dados = opcoes[selecao_formatada]
-        with st.spinner(f"Lendo **{dados['name']}** do Google Drive..."):
-            df = carregar_planilha_drive(dados["id"], dados["mimeType"], dados["name"])
+    pasta_id_atual = mapa_pastas[pasta_selecionada_nome]
+
+    # 2º PASSO: Listar os arquivos contidos na pasta escolhida
+    arquivos = listar_arquivos_da_pasta(pasta_id_atual)
+
+    if not arquivos:
+        st.info("ℹ️ Não há arquivos de planilha nesta pasta específica.")
+        return
+
+    opcoes_arquivos = {arq["name"]: arq for arq in arquivos}
+
+    arquivo_selecionado_nome = st.selectbox(
+        "📄 2. Escolha o Arquivo / Planilha:",
+        options=list(opcoes_arquivos.keys())
+    )
+
+    # 3º PASSO: Carregar e exibir a planilha escolhida
+    if arquivo_selecionado_nome:
+        dados_arquivo = opcoes_arquivos[arquivo_selecionado_nome]
+        with st.spinner(f"Lendo **{arquivo_selecionado_nome}**..."):
+            df = carregar_planilha_drive(dados_arquivo["id"], dados_arquivo["mimeType"], arquivo_selecionado_nome)
 
         if df is not None and not df.empty:
-            exibir_interface_pesquisa(df, dados["name"])
+            exibir_interface_pesquisa(df, arquivo_selecionado_nome)
         else:
-            st.warning("A planilha selecionada está vazia ou não pôde ser lida.")
+            st.warning("A planilha selecionada está vazia ou não pôde ser processada.")
 
 
 def exibir_interface_pesquisa(df: pd.DataFrame, nome_arquivo: str):
-    """Exibe a interface interativa de busca nos dados da planilha selecionada."""
-    st.success(f"Planilha **{nome_arquivo}** carregada com sucesso ({len(df)} registros).", icon="📊")
+    """Exibe o mecanismo de busca e métricas na planilha aberta."""
+    st.success(f"Planilha **{nome_arquivo}** aberta ({len(df)} registros).", icon="📊")
     st.markdown("---")
 
     termo_busca = st.text_input("🔎 Digite para pesquisar (Nome, CPF, Matrícula, Processo, etc.):", "")
@@ -191,7 +203,6 @@ def exibir_interface_pesquisa(df: pd.DataFrame, nome_arquivo: str):
     col_m1, col_m2 = st.columns(2)
     col_m1.metric("Registros Encontrados", len(df_filtrado))
 
-    # Identifica colunas de dias remidos para totalização
     colunas_dias = [c for c in df_filtrado.columns if "dia" in c.lower() or "remi" in c.lower()]
     if colunas_dias:
         col_dias = colunas_dias[0]
