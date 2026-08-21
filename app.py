@@ -11,25 +11,28 @@ from paginas import inclusao, atualizacoes, pesquisa
 
 st.set_page_config(page_title="SINALE WEB", layout="wide")
 
-# --- BANDEIRA DA BAHIA EM TODA A TELA ---
-st.markdown("""
-<style>
-    /* Aplica o fundo na raiz absoluta da aplicação */
-    .stApp {
-        background: linear-gradient(rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.85)), 
-                    url("https://upload.wikimedia.org/wikipedia/commons/2/28/Bandeira_do_Estado_da_Bahia.svg") no-repeat center center fixed !important;
-        background-size: cover !important;
-    }
+# --- BANDEIRA DA BAHIA EM SVG INLINE (SEM LINK EXTERNO) ---
+BAHIA_FLAG_SVG = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 900 600'><rect width='900' height='600' fill='%23ffffff'/><rect y='150' width='900' height='150' fill='%23c8102e'/><rect y='450' width='900' height='150' fill='%23c8102e'/><rect width='300' height='300' fill='%23002b7f'/><polygon points='150,60 225,225 75,225' fill='%23ffffff'/></svg>"
 
-    /* Remove a opacidade/fundo branco das camadas internas do Streamlit */
+st.markdown(f"""
+<style>
+    /* Aplica a bandeira da Bahia como marca d'água no fundo geral */
+    .stApp {{
+        background-image: linear-gradient(rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.88)), 
+                          url("{BAHIA_FLAG_SVG}") !important;
+        background-repeat: no-repeat !important;
+        background-position: center center !important;
+        background-size: cover !important;
+        background-attachment: fixed !important;
+    }}
+
+    /* Transparência nos contêineres internos */
     [data-testid="stAppViewContainer"],
     [data-testid="stHeader"],
     [data-testid="stMain"],
-    .main,
-    section.main {
+    .main {{
         background: transparent !important;
-        background-color: transparent !important;
-    }
+    }}
 </style>
 """, unsafe_allow_html=True)
 
