@@ -74,19 +74,36 @@ def gerar_config_largura_colunas(df: pd.DataFrame, colunas: list) -> dict:
 def render_pesquisa_remicao():
     titulo_estilizado("Pesquisa para Remição")
 
-    # Inicializa a chave dinâmica para zerar os componentes visuais no "Limpar Tudo"
+    # Inicializa chave dinâmica de controle de componentes
     if "uploader_key" not in st.session_state:
         st.session_state["uploader_key"] = 0
 
-    st.subheader("1. Configuração de Arquivos, Abas e Campos")
+    st.subheader("1. Seleção de Arquivos, Abas e Campos")
 
-    # Obtém os arquivos diretamente do session_state (carregados previamente no sistema)
-    uploaded_files = st.session_state.get("uploaded_files", [])
+    # Recupera todos os arquivos que já estão salvos no session_state do sistema
+    todos_arquivos = st.session_state.get("uploaded_files", [])
+
+    if not todos_arquivos:
+        st.warning("⚠️ Nenhum arquivo foi encontrado no sistema. Por favor, carregue os arquivos primeiro no módulo de upload.")
+        return
+
+    # --- SELEÇÃO DE ARQUIVOS (RESTAURADA) ---
+    nomes_disponiveis = [f.name for f in todos_arquivos]
     
-    qtd_arquivos = len(uploaded_files) if uploaded_files else 0
-    st.info(f"📊 **Quantidade de arquivos selecionados:** {qtd_arquivos}")
+    arquivos_selecionados_nomes = st.multiselect(
+        "📁 Selecione o(s) arquivo(s) que deseja pesquisar:",
+        options=nomes_disponiveis,
+        default=nomes_disponiveis,
+        key=f"select_files_pesquisa_{st.session_state['uploader_key']}"
+    )
 
-    fazer_upload_btn = st.button("Configurar Abas e Campos", key="btn_fazer_upload_op3", type="primary")
+    # Filtra os objetos de arquivo com base nos nomes selecionados na tela
+    uploaded_files = [f for f in todos_arquivos if f.name in arquivos_selecionados_nomes]
+    qtd_arquivos = len(uploaded_files)
+
+    st.info(f"📊 **Quantidade de arquivos selecionados para análise:** {qtd_arquivos}")
+
+    fazer_upload_btn = st.button("Configurar Abas e Campos dos Arquivos Selecionados", key="btn_fazer_upload_op3", type="primary")
 
     if fazer_upload_btn:
         if uploaded_files:
@@ -94,7 +111,7 @@ def render_pesquisa_remicao():
             st.session_state["rolar_apos_upload"] = True
             st.success("Arquivos identificados com sucesso! Configure as abas abaixo:")
         else:
-            st.error("Nenhum arquivo encontrado no sistema para configurar. Por favor, carregue os arquivos primeiro.")
+            st.error("Selecione pelo menos um arquivo na caixa acima para continuar.")
             st.session_state["executar_config"] = False
             st.session_state["rolar_apos_upload"] = False
 
@@ -573,6 +590,9 @@ def render_pesquisa_remicao():
                                 if "REAL" in df_nome_sel.columns:
                                     soma_horas = sum(conv_num(v) for v in df_nome_sel["REAL"])
                                     st.caption(f"⏱️ **Soma total de Horas Realizadas no período selecionado:** {int(round(soma_horas))} h")
+
+# ALIAS PARA GARANTIR COMPATIBILIDADE COM O SEU APP.PY
+renderizar = render_pesquisa_remicao
 
 # Execução direta se o arquivo for rodado individualmente
 if __name__ == "__main__":
