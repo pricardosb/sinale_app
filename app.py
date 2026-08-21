@@ -11,56 +11,50 @@ from paginas import inclusao, atualizacoes, pesquisa
 
 st.set_page_config(page_title="SINALE WEB", layout="wide")
 
-# --- ESTILIZAÇÃO CSS SIMPLIFICADA PARA GARANTIR VISIBILIDADE ---
+# --- ESTILIZAÇÃO CSS CORRIGIDA PARA VISIBILIDADE DO TEXTO ---
 st.markdown("""
 <style>
-    /* Estilo Geral dos Botões */
+    /* Estilo Base dos Botões */
     div.stButton > button {
-        width: 100%;
-        height: 70px;
-        font-size: 16px !important;
-        font-weight: 700 !important;
+        width: 100% !important;
+        height: 70px !important;
         border-radius: 8px !important;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        color: white !important; /* Texto branco para todos */
         border: none !important;
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-        transition: all 0.2s ease;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.12) !important;
+        transition: all 0.2s ease-in-out !important;
     }
 
-    /* Efeitos de Hover */
+    /* FORÇA O TEXTO INTERNO DO STREAMLIT (TAGS P E SPAN) A FICAR VISÍVEL E BRANCO */
+    div.stButton > button *, 
+    div.stButton > button p, 
+    div.stButton > button span {
+        color: #FFFFFF !important;
+        font-size: 15px !important;
+        font-weight: 700 !important;
+        letter-spacing: 0.5px !important;
+        text-transform: uppercase !important;
+    }
+
+    /* Efeito Hover */
     div.stButton > button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 12px rgba(0, 0, 0, 0.2);
+        transform: translateY(-2px) !important;
+        box-shadow: 0 6px 12px rgba(0, 0, 0, 0.25) !important;
     }
 
-    /* Cores Específicas por Classe de Envolvimento */
-    .btn-inclusao div.stButton > button {
-        background-color: #2563eb !important; /* Azul */
-    }
+    /* CORES INDIVIDUAIS POR CLASSE */
+    .btn-inclusao div.stButton > button { background-color: #1d4ed8 !important; }
+    .btn-atualizacao div.stButton > button { background-color: #d97706 !important; }
+    .btn-pesquisa div.stButton > button { background-color: #15803d !important; }
+    .btn-limpar div.stButton > button { background-color: #dc2626 !important; }
+    .btn-sair div.stButton > button { background-color: #4b5563 !important; }
 
-    .btn-atualizacao div.stButton > button {
-        background-color: #ea580c !important; /* Laranja */
+    /* Botão Voltar (Página interna) */
+    .btn-voltar div.stButton > button { 
+        background-color: #374151 !important; 
+        height: 45px !important; 
     }
-
-    .btn-pesquisa div.stButton > button {
-        background-color: #16a34a !important; /* Verde */
-    }
-
-    .btn-limpar div.stButton > button {
-        background-color: #dc2626 !important; /* Vermelho */
-    }
-
-    .btn-sair div.stButton > button {
-        background-color: #6b7280 !important; /* Cinza */
-    }
-
-    /* Botão Voltar (Compacto) */
-    .btn-voltar div.stButton > button {
-        height: 50px !important;
-        font-size: 14px !important;
-        background-color: #4b5563 !important; /* Cinza Escuro */
+    .btn-voltar div.stButton > button * {
+        font-size: 13px !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -75,10 +69,10 @@ if "fila_modificacoes" not in st.session_state:
 if "pagina" not in st.session_state:
     st.session_state["pagina"] = "menu"
 
-# --- TÍTULO FIXO DA APLICAÇÃO (TOPO) - LIMPO E VISÍVEL ---
+# --- TÍTULO FIXO DA APLICAÇÃO (TOPO) ---
 st.markdown(
-    "<div style='text-align: center; padding: 1.2rem; background-color: #1e3c72; color: white; border-radius: 10px; margin-bottom: 2rem; box-shadow: 0 4px 10px rgba(0,0,0,0.1);'>"
-    "<h1 style='margin:0; font-size: 2.2rem;'>SINALE WEB</h1><p style='margin:0; opacity: 0.9;'>Sistema de Remição de Pena no Serviço Público</p></div>",
+    "<div style='text-align: center; padding: 1.2rem; background-color: #1e3c72; color: white; border-radius: 10px; margin-bottom: 1.5rem; box-shadow: 0 4px 10px rgba(0,0,0,0.1);'>"
+    "<h1 style='margin:0; font-size: 2.2rem;'>⚡ SINALE WEB</h1><p style='margin:0; opacity: 0.9;'>Sistema de Remição de Pena no Serviço Público</p></div>",
     unsafe_allow_html=True
 )
 
@@ -93,9 +87,10 @@ if st.session_state["pagina"] != "menu":
         st.markdown('</div>', unsafe_allow_html=True)
     st.markdown("---")
 
-# --- MENU PRINCIPAL (COM ENVOLTÓRIOS DE CLASSE PARA CORES) ---
+# --- MENU PRINCIPAL ---
 if st.session_state["pagina"] == "menu":
     st.markdown("### Selecione a operação desejada:")
+    st.markdown("<br>", unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns(3)
     
