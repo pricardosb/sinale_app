@@ -153,4 +153,5 @@ else:
         atualizacoes.renderizar()
 
     elif st.session_state["pagina"] == "pesquisa":
-        pesquisa.renderizar()
+        # Como deve ficar:
+        pesquisa.render_pesquisa_remicao()
