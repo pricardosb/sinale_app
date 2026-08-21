@@ -4,6 +4,145 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
+# Importações para integração com o Google Drive
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
+
+
+# =============================================================================
+# WRAPPER AUXILIAR PARA COMPATIBILIDADE DE ARQUIVOS
+# =============================================================================
+
+class DriveFileWrapper:
+    """Simula o comportamento do UploadedFile do Streamlit para arquivos do Drive."""
+    def __init__(self, name: str, content_bytes: bytes):
+        self.name = name
+        self._bytes = content_bytes
+
+    def getvalue(self) -> bytes:
+        return self._bytes
+
+
+# =============================================================================
+# INTEGRACAO E CONEXAO COM GOOGLE DRIVE
+# =============================================================================
+
+def conectar_google_drive():
+    """Autentica na API do Google Drive usando as credenciais do Secrets."""
+    try:
+        if "gcp_service_account" not in st.secrets:
+            return None
+        
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        if "private_key" in creds_dict:
+            creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+
+        scopes = ["https://www.googleapis.com/auth/drive"]
+        creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=scopes)
+        return build("drive", "v3", credentials=creds)
+    except Exception as e:
+        st.error(f"Erro na autenticação com o Google Drive: {e}")
+        return None
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def obter_todas_pastas(root_folder_id: str):
+    """Mapeia todas as pastas e subpastas utilizando seus nomes originais."""
+    service = conectar_google_drive()
+    if not service:
+        return []
+
+    pastas = []
+    
+    # Obtém nome original da pasta raiz
+    try:
+        raiz_info = service.files().get(fileId=root_folder_id, fields="id, name").execute()
+        pastas.append({"id": raiz_info["id"], "name": raiz_info["name"]})
+    except Exception:
+        pastas.append({"id": root_folder_id, "name": "Pasta Principal"})
+
+    def buscar_subpastas(parent_id):
+        mime_folder = "application/vnd.google-apps.folder"
+        try:
+            query = f"'{parent_id}' in parents and mimeType = '{mime_folder}' and trashed = false"
+            results = service.files().list(
+                q=query,
+                fields="files(id, name)",
+                pageSize=100
+            ).execute()
+
+            for subpasta in results.get("files", []):
+                pastas.append({"id": subpasta["id"], "name": subpasta["name"]})
+                buscar_subpastas(subpasta["id"])
+        except Exception as e:
+            st.warning(f"Erro ao buscar subpastas de {parent_id}: {e}")
+
+    buscar_subpastas(root_folder_id)
+    return pastas
+
+
+def listar_arquivos_das_pastas(folder_ids: list):
+    """Lista as planilhas contidas em todas as pastas/subpastas selecionadas."""
+    service = conectar_google_drive()
+    if not service or not folder_ids:
+        return []
+
+    extensoes_validas = ('.xlsx', '.xls', '.ods', '.csv')
+    mime_google_sheets = "application/vnd.google-apps.spreadsheet"
+
+    arquivos = []
+    for f_id in folder_ids:
+        try:
+            query = f"'{f_id}' in parents and trashed = false"
+            results = service.files().list(
+                q=query,
+                fields="files(id, name, mimeType)",
+                pageSize=100
+            ).execute()
+
+            for item in results.get("files", []):
+                nome_lc = item["name"].lower()
+                if nome_lc.endswith(extensoes_validas) or item["mimeType"] == mime_google_sheets:
+                    arquivos.append(item)
+        except Exception as e:
+            st.error(f"Erro ao listar arquivos da pasta {f_id}: {e}")
+
+    return arquivos
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def baixar_arquivo_drive_em_memoria(file_id: str, mime_type: str, nome_arquivo: str):
+    """Baixa o arquivo do Google Drive diretamente em memória (BytesIO)."""
+    service = conectar_google_drive()
+    if not service:
+        return None
+
+    try:
+        if mime_type == "application/vnd.google-apps.spreadsheet":
+            request = service.files().export_media(
+                fileId=file_id,
+                mimeType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+            if not nome_arquivo.lower().endswith('.xlsx'):
+                nome_arquivo += ".xlsx"
+        else:
+            request = service.files().get_media(fileId=file_id)
+
+        fh = io.BytesIO()
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+
+        fh.seek(0)
+        return DriveFileWrapper(nome_arquivo, fh.getvalue())
+
+    except Exception as e:
+        st.error(f"Erro ao baixar o arquivo **{nome_arquivo}**: {e}")
+        return None
+
+
 # =============================================================================
 # FUNÇÕES AUXILIARES DE SUPORTE
 # =============================================================================
@@ -72,50 +211,104 @@ def gerar_config_largura_colunas(df: pd.DataFrame, colunas: list) -> dict:
 # =============================================================================
 
 def render_pesquisa_remicao():
-    titulo_estilizado("Pesquisa para Remição")
+    titulo_estilizado("Pesquisa e Consulta de Remição de Pena")
 
-    # Inicializa chave dinâmica de controle de componentes
     if "uploader_key" not in st.session_state:
         st.session_state["uploader_key"] = 0
 
-    st.subheader("1. Seleção de Arquivos, Abas e Campos")
+    # -------------------------------------------------------------------------
+    # PASSO 1: NAVEGAÇÃO E SELEÇÃO NO GOOGLE DRIVE
+    # -------------------------------------------------------------------------
+    st.subheader("1. Seleção de Pastas e Planilhas no Google Drive")
 
-    # Recupera todos os arquivos que já estão salvos no session_state do sistema
-    todos_arquivos = st.session_state.get("uploaded_files", [])
-
-    if not todos_arquivos:
-        st.warning("⚠️ Nenhum arquivo foi encontrado no sistema. Por favor, carregue os arquivos primeiro no módulo de upload.")
+    if "gcp_service_account" not in st.secrets:
+        st.error("❌ Credenciais do Google Drive não configuradas no `st.secrets`.")
         return
 
-    # --- SELEÇÃO DE ARQUIVOS (RESTAURADA) ---
-    nomes_disponiveis = [f.name for f in todos_arquivos]
-    
+    root_folder_id = st.secrets["gcp_service_account"].get("pasta_id")
+    if not root_folder_id:
+        st.error("❌ Parâmetro `pasta_id` ausente no `st.secrets`.")
+        return
+
+    # Mapeamento dinâmico de pastas e subpastas
+    with st.spinner("Mapeando pastas e subpastas do Google Drive..."):
+        lista_pastas = obter_todas_pastas(root_folder_id)
+
+    if not lista_pastas:
+        st.warning("Nenhuma pasta ou subpasta foi encontrada no Google Drive.")
+        return
+
+    mapa_pastas = {}
+    for p in lista_pastas:
+        nome_orig = p["name"]
+        chave = nome_orig if nome_orig not in mapa_pastas else f"{nome_orig} ({p['id'][:4]})"
+        mapa_pastas[chave] = p["id"]
+
+    col_p1, col_p2 = st.columns([3, 1])
+    with col_p1:
+        pastas_selecionadas_nomes = st.multiselect(
+            "📁 Selecione a(s) Pasta(s) / Subpasta(s) para pesquisar:",
+            options=list(mapa_pastas.keys()),
+            default=list(mapa_pastas.keys())[0] if mapa_pastas else [],
+            key=f"select_drive_pastas_{st.session_state['uploader_key']}"
+        )
+    with col_p2:
+        if st.button("🔄 Recarregar Pastas", use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
+
+    if not pastas_selecionadas_nomes:
+        st.info("Selecione ao menos uma pasta para listar as planilhas.")
+        return
+
+    folder_ids_selecionados = [mapa_pastas[nome] for nome in pastas_selecionadas_nomes]
+
+    # Lista arquivos das pastas selecionadas
+    arquivos_drive = listar_arquivos_das_pastas(folder_ids_selecionados)
+
+    if not arquivos_drive:
+        st.warning("Nenhum arquivo de planilha encontrado nas pastas selecionadas.")
+        return
+
+    mapa_arquivos = {}
+    for arq in arquivos_drive:
+        nome_arq = arq["name"]
+        chave_arq = nome_arq if nome_arq not in mapa_arquivos else f"{nome_arq} ({arq['id'][:4]})"
+        mapa_arquivos[chave_arq] = arq
+
     arquivos_selecionados_nomes = st.multiselect(
-        "📁 Selecione o(s) arquivo(s) que deseja pesquisar:",
-        options=nomes_disponiveis,
-        default=nomes_disponiveis,
-        key=f"select_files_pesquisa_{st.session_state['uploader_key']}"
+        "📄 Selecione a(s) Planilha(s) que deseja processar:",
+        options=list(mapa_arquivos.keys()),
+        default=list(mapa_arquivos.keys()),
+        key=f"select_drive_files_{st.session_state['uploader_key']}"
     )
 
-    # Filtra os objetos de arquivo com base nos nomes selecionados na tela
-    uploaded_files = [f for f in todos_arquivos if f.name in arquivos_selecionados_nomes]
-    qtd_arquivos = len(uploaded_files)
+    if not arquivos_selecionados_nomes:
+        st.info("Selecione ao menos uma planilha para continuar.")
+        return
 
-    st.info(f"📊 **Quantidade de arquivos selecionados para análise:** {qtd_arquivos}")
+    st.info(f"📊 **Quantidade de planilhas selecionadas:** {len(arquivos_selecionados_nomes)}")
 
-    fazer_upload_btn = st.button("Configurar Abas e Campos dos Arquivos Selecionados", key="btn_fazer_upload_op3", type="primary")
+    # -------------------------------------------------------------------------
+    # PASSO 2: DOWNLOAD EM MEMÓRIA E CONFIGURAÇÃO DE ABAS/CAMPOS
+    # -------------------------------------------------------------------------
+    fazer_upload_btn = st.button("Configurar Abas e Campos das Planilhas Selecionadas", key="btn_fazer_upload_op3", type="primary")
 
     if fazer_upload_btn:
-        if uploaded_files:
-            st.session_state["executar_config"] = True
-            st.session_state["rolar_apos_upload"] = True
-            st.success("Arquivos identificados com sucesso! Configure as abas abaixo:")
-        else:
-            st.error("Selecione pelo menos um arquivo na caixa acima para continuar.")
-            st.session_state["executar_config"] = False
-            st.session_state["rolar_apos_upload"] = False
+        st.session_state["executar_config"] = True
+        st.session_state["rolar_apos_upload"] = True
+        st.success("Planilhas carregadas com sucesso! Configure as abas e colunas abaixo:")
 
-    if uploaded_files and st.session_state.get("executar_config"):
+    if st.session_state.get("executar_config"):
+        # Realiza o download dos arquivos selecionados do Drive para objetos em memória
+        uploaded_files = []
+        with st.spinner("Baixando planilhas selecionadas do Google Drive..."):
+            for nome_chave in arquivos_selecionados_nomes:
+                dados_arq = mapa_arquivos[nome_chave]
+                file_obj = baixar_arquivo_drive_em_memoria(dados_arq["id"], dados_arq["mimeType"], dados_arq["name"])
+                if file_obj:
+                    uploaded_files.append(file_obj)
+
         settings = {}
         for f_idx, f in enumerate(uploaded_files):
             file_key = f"{f_idx}_{f.name}"
@@ -220,7 +413,7 @@ def render_pesquisa_remicao():
 
         btn_consolidar = st.button("🔍 Carregar e Consolidar Dados para Pesquisa", key="btn_consolidar_op3", type="primary")
 
-        # ROLAGEM AUTOMÁTICA
+        # Rolagem suave automática
         if st.session_state.get("rolar_apos_upload"):
             components.html(
                 """
@@ -240,6 +433,9 @@ def render_pesquisa_remicao():
             )
             st.session_state["rolar_apos_upload"] = False
 
+        # ---------------------------------------------------------------------
+        # PASSO 3: CONSOLIDAÇÃO DOS DADOS E APLICAÇÃO DAS REGRAS DE NEGÓCIO
+        # ---------------------------------------------------------------------
         if btn_consolidar:
             all_results = []
             for f_idx, f in enumerate(uploaded_files):
@@ -438,7 +634,9 @@ def render_pesquisa_remicao():
                 st.warning("Nenhum dado encontrado com as configurações informadas.")
                 st.session_state["pesquisa_df"] = None
 
-    # Exibição e Filtros dos Dados Consolidados
+    # -------------------------------------------------------------------------
+    # PASSO 4: EXIBIÇÃO, FILTROS E VISUALIZAÇÃO DOS RESULTADOS
+    # -------------------------------------------------------------------------
     if st.session_state.get("pesquisa_df") is not None:
         df_pesq = st.session_state["pesquisa_df"]
         st.markdown("---")
@@ -591,7 +789,8 @@ def render_pesquisa_remicao():
                                     soma_horas = sum(conv_num(v) for v in df_nome_sel["REAL"])
                                     st.caption(f"⏱️ **Soma total de Horas Realizadas no período selecionado:** {int(round(soma_horas))} h")
 
-# ALIAS PARA GARANTIR COMPATIBILIDADE COM O SEU APP.PY
+
+# Alias para garantir compatibilidade com chamadas no app.py (pesquisa.renderizar())
 renderizar = render_pesquisa_remicao
 
 # Execução direta se o arquivo for rodado individualmente
