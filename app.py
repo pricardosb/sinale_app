@@ -1,8 +1,17 @@
+import sys
+from pathlib import Path
+
+# Adiciona o diretório 'sinale_app' ao PATH do Python para localizar 'paginas' e 'utils'
+ROOT_DIR = Path(__file__).resolve().parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
+
 import streamlit as st
 from paginas import inclusao, atualizacoes, pesquisa
 
 st.set_page_config(page_title="SINALE WEB", layout="wide")
 
+# ... (Mantenha o restante do código do app.py igual)
 # Inicializações Globais de Estado
 if "source_df" not in st.session_state:
     st.session_state["source_df"] = None
