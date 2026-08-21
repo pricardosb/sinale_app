@@ -25,15 +25,22 @@ def conectar_google_drive():
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def mapear_estrutura_pastas(folder_id):
-    """Varre o Drive e retorna um dicionário com todos os caminhos de pastas e seus respectivos IDs."""
+def obter_todas_pastas(root_folder_id):
+    """Mapeia todas as pastas e subpastas utilizando seus nomes originais."""
     service = conectar_google_drive()
     if not service:
-        return {}
+        return []
 
-    mapa_pastas = {"📂 [Pasta Principal]": folder_id}
+    pastas = []
+    
+    # Obtém nome original da pasta raiz
+    try:
+        raiz_info = service.files().get(fileId=root_folder_id, fields="id, name").execute()
+        pastas.append({"id": raiz_info["id"], "name": raiz_info["name"]})
+    except Exception:
+        pastas.append({"id": root_folder_id, "name": "Pasta Principal"})
 
-    def buscar_subpastas(parent_id, caminho_pai):
+    def buscar_subpastas(parent_id):
         mime_folder = "application/vnd.google-apps.folder"
         try:
             query = f"'{parent_id}' in parents and mimeType = '{mime_folder}' and trashed = false"
@@ -44,46 +51,42 @@ def mapear_estrutura_pastas(folder_id):
             ).execute()
 
             for subpasta in results.get("files", []):
-                caminho_completo = f"{caminho_pai} / {subpasta['name']}"
-                mapa_pastas[f"📁 {caminho_completo}"] = subpasta["id"]
-                # Busca recursiva para sub-subpastas
-                buscar_subpastas(subpasta["id"], caminho_completo)
+                pastas.append({"id": subpasta["id"], "name": subpasta["name"]})
+                buscar_subpastas(subpasta["id"])
         except Exception as e:
-            st.warning(f"Erro ao mapear a pasta {caminho_pai}: {e}")
+            st.warning(f"Erro ao buscar subpastas de {parent_id}: {e}")
 
-    buscar_subpastas(folder_id, "Principal")
-    return mapa_pastas
+    buscar_subpastas(root_folder_id)
+    return pastas
 
 
-def listar_arquivos_da_pasta(folder_id):
-    """Lista apenas as planilhas localizadas diretamente dentro da pasta selecionada."""
+def listar_arquivos_das_pastas(folder_ids):
+    """Lista as planilhas contidas em todas as pastas selecionadas."""
     service = conectar_google_drive()
-    if not service:
+    if not service or not folder_ids:
         return []
 
     extensoes_validas = ('.xlsx', '.xls', '.ods', '.csv')
     mime_google_sheets = "application/vnd.google-apps.spreadsheet"
 
-    try:
-        query = f"'{folder_id}' in parents and trashed = false"
-        results = service.files().list(
-            q=query,
-            fields="files(id, name, mimeType)",
-            pageSize=100
-        ).execute()
+    arquivos = []
+    for f_id in folder_ids:
+        try:
+            query = f"'{f_id}' in parents and trashed = false"
+            results = service.files().list(
+                q=query,
+                fields="files(id, name, mimeType)",
+                pageSize=100
+            ).execute()
 
-        itens = results.get("files", [])
-        
-        arquivos = []
-        for item in itens:
-            nome_lc = item["name"].lower()
-            if nome_lc.endswith(extensoes_validas) or item["mimeType"] == mime_google_sheets:
-                arquivos.append(item)
+            for item in results.get("files", []):
+                nome_lc = item["name"].lower()
+                if nome_lc.endswith(extensoes_validas) or item["mimeType"] == mime_google_sheets:
+                    arquivos.append(item)
+        except Exception as e:
+            st.error(f"Erro ao listar arquivos da pasta {f_id}: {e}")
 
-        return arquivos
-    except Exception as e:
-        st.error(f"Erro ao buscar arquivos na pasta selecionada: {e}")
-        return []
+    return arquivos
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -126,7 +129,7 @@ def carregar_planilha_drive(file_id, mime_type, nome_arquivo):
 
 def renderizar():
     st.subheader("🔍 Pesquisa e Consulta de Remição de Pena")
-    st.markdown("Navegue pelas pastas do **Google Drive** e selecione a planilha desejada.")
+    st.markdown("Selecione uma ou mais pastas e planilhas do **Google Drive** para consultar os dados.")
 
     if "gcp_service_account" not in st.secrets:
         st.error("❌ Credenciais do Google Drive não configuradas no `st.secrets`.")
@@ -137,57 +140,92 @@ def renderizar():
         st.error("❌ Parâmetro `pasta_id` ausente no `st.secrets`.")
         return
 
-    # 1º PASSO: Mapear e selecionar a Pasta / Subpasta
-    with st.spinner("Mapeando pastas e subpastas no Google Drive..."):
-        mapa_pastas = mapear_estrutura_pastas(root_folder_id)
+    # 1. Carrega todas as pastas mantendo os nomes originais
+    with st.spinner("Mapeando estrutura de pastas..."):
+        lista_pastas = obter_todas_pastas(root_folder_id)
 
-    if not mapa_pastas:
-        st.warning("Nenhuma pasta foi encontrada ou permissão negada.")
+    if not lista_pastas:
+        st.warning("Nenhuma pasta foi encontrada no Google Drive.")
         return
 
-    col_pasta, col_btn = st.columns([3, 1])
-    with col_pasta:
-        pasta_selecionada_nome = st.selectbox(
-            "📂 1. Escolha a Pasta / Subpasta:",
-            options=list(mapa_pastas.keys())
-        )
+    # Mapeia Nome Original -> ID (trata duplicados se houverem nomes idênticos em locais diferentes)
+    mapa_pastas = {}
+    for p in lista_pastas:
+        nome_orig = p["name"]
+        chave = nome_orig if nome_orig not in mapa_pastas else f"{nome_orig} ({p['id'][:4]})"
+        mapa_pastas[chave] = p["id"]
+
+    # 1º PASSO: CAIXA DE ROLAGEM MULTI-SELEÇÃO DE PASTAS
+    st.markdown("**1. Selecione a(s) Pasta(s):**")
+    col_pastas, col_btn = st.columns([3, 1])
+    
+    with col_pastas:
+        with st.container(height=150):
+            pastas_selecionadas_nomes = st.multiselect(
+                "Marque uma ou mais pastas para buscar arquivos:",
+                options=list(mapa_pastas.keys()),
+                default=list(mapa_pastas.keys())[0] if mapa_pastas else [],
+                label_visibility="collapsed"
+            )
+
     with col_btn:
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("🔄 Atualizar Pastas", use_container_width=True):
+        if st.button("🔄 Recarregar Lista", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
 
-    pasta_id_atual = mapa_pastas[pasta_selecionada_nome]
-
-    # 2º PASSO: Listar os arquivos contidos na pasta escolhida
-    arquivos = listar_arquivos_da_pasta(pasta_id_atual)
-
-    if not arquivos:
-        st.info("ℹ️ Não há arquivos de planilha nesta pasta específica.")
+    if not pastas_selecionadas_nomes:
+        st.info("Selecione ao menos uma pasta na caixa acima.")
         return
 
-    opcoes_arquivos = {arq["name"]: arq for arq in arquivos}
+    folder_ids_selecionados = [mapa_pastas[nome] for nome in pastas_selecionadas_nomes]
 
-    arquivo_selecionado_nome = st.selectbox(
-        "📄 2. Escolha o Arquivo / Planilha:",
-        options=list(opcoes_arquivos.keys())
-    )
+    # 2º PASSO: BUSCA ARQUIVOS DAS PASTAS SELECIONADAS
+    arquivos = listar_arquivos_das_pastas(folder_ids_selecionados)
 
-    # 3º PASSO: Carregar e exibir a planilha escolhida
-    if arquivo_selecionado_nome:
-        dados_arquivo = opcoes_arquivos[arquivo_selecionado_nome]
-        with st.spinner(f"Lendo **{arquivo_selecionado_nome}**..."):
-            df = carregar_planilha_drive(dados_arquivo["id"], dados_arquivo["mimeType"], arquivo_selecionado_nome)
+    if not arquivos:
+        st.info("ℹ️ Nenhum arquivo de planilha foi encontrado nas pastas selecionadas.")
+        return
 
-        if df is not None and not df.empty:
-            exibir_interface_pesquisa(df, arquivo_selecionado_nome)
-        else:
-            st.warning("A planilha selecionada está vazia ou não pôde ser processada.")
+    mapa_arquivos = {}
+    for arq in arquivos:
+        nome_arq = arq["name"]
+        chave_arq = nome_arq if nome_arq not in mapa_arquivos else f"{nome_arq} ({arq['id'][:4]})"
+        mapa_arquivos[chave_arq] = arq
+
+    # 2º PASSO: CAIXA DE ROLAGEM MULTI-SELEÇÃO DE PLANILHAS
+    st.markdown("**2. Selecione a(s) Planilha(s) para Consulta:**")
+    with st.container(height=150):
+        arquivos_selecionados_nomes = st.multiselect(
+            "Marque uma ou mais planilhas para abrir e combinar os dados:",
+            options=list(mapa_arquivos.keys()),
+            default=[list(mapa_arquivos.keys())[0]] if mapa_arquivos else [],
+            label_visibility="collapsed"
+        )
+
+    if not arquivos_selecionados_nomes:
+        st.info("Selecione ao menos uma planilha para carregar os dados.")
+        return
+
+    # 3º PASSO: LEITURA E CONSOLIDAÇÃO DOS DADOS
+    dfs_carregados = []
+    with st.spinner("Lendo e unificando planilhas selecionadas..."):
+        for nome_chave in arquivos_selecionados_nomes:
+            dados_arq = mapa_arquivos[nome_chave]
+            df = carregar_planilha_drive(dados_arq["id"], dados_arq["mimeType"], dados_arq["name"])
+            if df is not None and not df.empty:
+                df["_Arquivo_Origem"] = dados_arq["name"]
+                dfs_carregados.append(df)
+
+    if dfs_carregados:
+        df_consolidado = pd.concat(dfs_carregados, ignore_index=True)
+        exibir_interface_pesquisa(df_consolidado, len(arquivos_selecionados_nomes))
+    else:
+        st.warning("As planilhas selecionadas estão vazias ou não puderam ser lidas.")
 
 
-def exibir_interface_pesquisa(df: pd.DataFrame, nome_arquivo: str):
-    """Exibe o mecanismo de busca e métricas na planilha aberta."""
-    st.success(f"Planilha **{nome_arquivo}** aberta ({len(df)} registros).", icon="📊")
+def exibir_interface_pesquisa(df: pd.DataFrame, qtd_arquivos: int):
+    """Exibe o mecanismo de busca e métricas agregadas."""
+    st.success(f"Carregado(s) **{qtd_arquivos} arquivo(s)** com **{len(df)} registros** no total.", icon="📊")
     st.markdown("---")
 
     termo_busca = st.text_input("🔎 Digite para pesquisar (Nome, CPF, Matrícula, Processo, etc.):", "")
