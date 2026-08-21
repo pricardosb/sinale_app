@@ -11,18 +11,18 @@ from paginas import inclusao, atualizacoes, pesquisa
 
 st.set_page_config(page_title="SINALE WEB", layout="wide")
 
-# --- BANDEIRA DA BAHIA EM SVG INLINE (SEM LINK EXTERNO) ---
+# --- BANDEIRA DA BAHIA EM SVG INLINE (PADRÃO REPETIDO E COM REALCE) ---
 BAHIA_FLAG_SVG = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 900 600'><rect width='900' height='600' fill='%23ffffff'/><rect y='150' width='900' height='150' fill='%23c8102e'/><rect y='450' width='900' height='150' fill='%23c8102e'/><rect width='300' height='300' fill='%23002b7f'/><polygon points='150,60 225,225 75,225' fill='%23ffffff'/></svg>"
 
 st.markdown(f"""
 <style>
-    /* Aplica a bandeira da Bahia como marca d'água no fundo geral */
+    /* Aplica o mosaico de bandeiras no fundo geral */
     .stApp {{
-        background-image: linear-gradient(rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.88)), 
+        background-image: linear-gradient(rgba(255, 255, 255, 0.70), rgba(255, 255, 255, 0.70)), 
                           url("{BAHIA_FLAG_SVG}") !important;
-        background-repeat: no-repeat !important;
-        background-position: center center !important;
-        background-size: cover !important;
+        background-repeat: repeat !important;
+        background-position: top left !important;
+        background-size: 180px 120px !important; /* Tamanho menor das bandeiras */
         background-attachment: fixed !important;
     }}
 
@@ -48,7 +48,7 @@ if "pagina" not in st.session_state:
 
 # --- TÍTULO FIXO DA APLICAÇÃO (TOPO) ---
 st.markdown(
-    "<div style='text-align: center; padding: 1.2rem; background-color: #1e3c72; color: white; border-radius: 10px; margin-bottom: 2rem;'>"
+    "<div style='text-align: center; padding: 1.2rem; background-color: #1e3c72; color: white; border-radius: 10px; margin-bottom: 2rem; box-shadow: 0 4px 10px rgba(0,0,0,0.15);'>"
     "<h1 style='margin:0; font-size: 2.2rem;'>⚡ SINALE WEB</h1><p style='margin:0; opacity: 0.9;'>Sistema de Remição de Pena no Serviço Público</p></div>",
     unsafe_allow_html=True
 )
