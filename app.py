@@ -33,7 +33,7 @@ st.markdown(f"""
         background: transparent !important;
     }}
 
-    /* PADRÃO DE BOTÕES (BORDA VERMELHA COM TRANSIÇÃO PARA AZUL NO HOVER) */
+    /* PADRÃO DOS BOTÕES DO MENU PRINCIPAL */
     div.stButton > button {{
         width: 100% !important;
         height: 52px !important;
@@ -54,6 +54,33 @@ st.markdown(f"""
         color: #FFFFFF !important;
         transform: translateY(-2px) !important;
         box-shadow: 0 6px 16px rgba(0, 43, 127, 0.25) !important;
+    }}
+
+    /* BOTÃO VOLTAR FIXO NA ROLAGEM (FUNDO VERMELHO QUE VIRA AZUL NO HOVER) */
+    div.element-container:has(.btn-voltar-fixo) + div.element-container button {{
+        position: fixed !important;
+        top: 20px !important;
+        left: 20px !important;
+        z-index: 999999 !important;
+        width: auto !important;
+        height: 46px !important;
+        padding: 0 1.2rem !important;
+        background-color: #CE1126 !important;
+        border: 2px solid #FFFFFF !important;
+        color: #FFFFFF !important;
+        border-radius: 8px !important;
+        font-weight: 700 !important;
+        font-size: 14px !important;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25) !important;
+        transition: all 0.25s ease-in-out !important;
+    }}
+
+    div.element-container:has(.btn-voltar-fixo) + div.element-container button:hover {{
+        background-color: #002B7F !important;
+        border-color: #FFFFFF !important;
+        color: #FFFFFF !important;
+        transform: scale(1.05) !important;
+        box-shadow: 0 6px 16px rgba(0, 43, 127, 0.4) !important;
     }}
 </style>
 """, unsafe_allow_html=True)
@@ -109,14 +136,15 @@ if st.session_state["pagina"] == "menu":
             st.session_state["pagina"] = "menu"
             st.rerun()
 
-# --- PÁGINAS INTERNAS (O BOTÃO SEGUIRÁ O FLUXO DA PÁGINA) ---
+# --- PÁGINAS INTERNAS ---
 else:
-    col_back, _ = st.columns([1, 4])
-    with col_back:
-        if st.button("⬅️ VOLTAR AO MENU", key="btn_voltar_menu", use_container_width=True):
-            st.session_state["pagina"] = "menu"
-            st.rerun()
-    st.markdown("---")
+    # Botão fixo no canto superior esquerdo (fundo vermelho -> vira azul no hover)
+    st.markdown('<div class="btn-voltar-fixo"></div>', unsafe_allow_html=True)
+    if st.button("⬅️ VOLTAR AO MENU", key="btn_voltar_fixo"):
+        st.session_state["pagina"] = "menu"
+        st.rerun()
+
+    st.markdown("<div style='margin-top: 1.5rem;'></div>", unsafe_allow_html=True)
 
     if st.session_state["pagina"] == "inclusao":
         inclusao.renderizar()
