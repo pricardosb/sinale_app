@@ -11,6 +11,38 @@ from paginas import inclusao, atualizacoes, pesquisa
 
 st.set_page_config(page_title="SINALE WEB", layout="wide")
 
+# --- ESTILIZAÇÃO CSS DOS BOTÕES ---
+st.markdown("""
+<style>
+    /* Estilo Base dos Botões */
+    div.stButton > button {
+        width: 100%;
+        height: 70px;
+        font-size: 15px !important;
+        font-weight: 700 !important;
+        letter-spacing: 0.8px;
+        border-radius: 8px !important;
+        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
+        transition: all 0.25s ease-in-out !important;
+        text-transform: uppercase;
+    }
+
+    /* Efeito de Elevação ao Passar o Mouse (Hover) */
+    div.stButton > button:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
+        border-color: rgba(255, 255, 255, 0.3) !important;
+    }
+
+    /* Efeito ao Clicar */
+    div.stButton > button:active {
+        transform: translateY(1px);
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    }
+</style>
+""", unsafe_allow_html=True)
+
 # Inicializações Globais de Estado
 if "source_df" not in st.session_state:
     st.session_state["source_df"] = None
@@ -33,8 +65,8 @@ if "pagina" not in st.session_state:
 
 # --- TÍTULO FIXO DA APLICAÇÃO (TOPO) ---
 st.markdown(
-    "<div style='text-align: center; padding: 1.2rem; background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: white; border-radius: 10px; margin-bottom: 2rem;'>"
-    "<h1 style='margin:0;'>⚡ SINALE WEB</h1><p style='margin:0;'>Sistema de Remição de Pena no Serviço Público</p></div>",
+    "<div style='text-align: center; padding: 1.2rem; background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: white; border-radius: 10px; margin-bottom: 2rem; box-shadow: 0 4px 12px rgba(0,0,0,0.15);'>"
+    "<h1 style='margin:0; font-size: 2.2rem;'>⚡ SINALE WEB</h1><p style='margin:0; opacity: 0.9;'>Sistema de Remição de Pena no Serviço Público</p></div>",
     unsafe_allow_html=True
 )
 
@@ -42,31 +74,31 @@ st.markdown(
 if st.session_state["pagina"] != "menu":
     col_back, _ = st.columns([1, 4])
     with col_back:
-        if st.button("⬅️ Voltar ao Menu Principal", use_container_width=True):
+        if st.button("⬅️ VOLTAR AO MENU", use_container_width=True):
             st.session_state["pagina"] = "menu"
             st.rerun()
     st.markdown("---")
 
-# --- MENU PRINCIPAL (APENAS BOTÕES DIRETOS) ---
+# --- MENU PRINCIPAL ---
 if st.session_state["pagina"] == "menu":
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        if st.button("INCLUSÃO PARA TRABALHO", key="btn_inc", use_container_width=True):
+        if st.button("INCLUSÃO PARA TRABALHO", key="btn_inc", use_container_width=True, type="primary"):
             st.session_state["pagina"] = "inclusao"
             st.rerun()
 
     with col2:
-        if st.button("ATUALIZAÇÃO GERAL", key="btn_atu", use_container_width=True):
+        if st.button("ATUALIZAÇÃO GERAL", key="btn_atu", use_container_width=True, type="primary"):
             st.session_state["pagina"] = "atualizacoes"
             st.rerun()
 
     with col3:
-        if st.button("PESQUISA REMIÇÃO", key="btn_pesq", use_container_width=True):
+        if st.button("PESQUISA REMIÇÃO", key="btn_pesq", use_container_width=True, type="primary"):
             st.session_state["pagina"] = "pesquisa"
             st.rerun()
 
-    st.markdown("---")
+    st.markdown("<br>", unsafe_allow_html=True)
 
     col4, col5 = st.columns(2)
     with col4:
