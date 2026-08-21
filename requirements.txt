@@ -5,3 +5,5 @@ openpyxl
 python-docx
 xlrd
 odfpy
+google-api-python-client
+google-auth
