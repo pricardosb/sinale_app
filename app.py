@@ -157,7 +157,7 @@ else:
         # no seu app.py (por volta da linha 157)
 
 # 1. Certifique-se de que o carregamento retorna o DataFrame
-df_dados = carregar_dados_web(URL_SUA_PLANILHA)
+    df_dados = carregar_dados_web(URL_SUA_PLANILHA)
 
 # 2. ADICIONE ESTA VERIFICAÇÃO ANTES DE CHAMAR A FUNÇÃO:
 if df_dados is not None and not df_dados.empty:
