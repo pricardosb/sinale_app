@@ -157,15 +157,15 @@ else:
         # no seu app.py (por volta da linha 157)
 
 # 1. Certifique-se de que o carregamento retorna o DataFrame
-    df_dados = carregar_dados_web(URL_SUA_PLANILHA)
+        df_dados = carregar_dados_web(URL_SUA_PLANILHA)
 
 # 2. ADICIONE ESTA VERIFICAÇÃO ANTES DE CHAMAR A FUNÇÃO:
-if df_dados is not None and not df_dados.empty:
+        if df_dados is not None and not df_dados.empty:
     # Se você passa o dataframe como parâmetro:
-    pesquisa.render_pesquisa_remicao(df_dados) 
+            pesquisa.render_pesquisa_remicao(df_dados) 
     # Ou se a função usa st.session_state:
     # st.session_state['df_dados'] = df_dados
     # pesquisa.render_pesquisa_remicao()
-else:
-    st.warning("⚠️ Não foi possível carregar os dados da planilha na web. Verifique a URL e a conexão com o arquivo.")
+        else:
+            st.warning("⚠️ Não foi possível carregar os dados da planilha na web. Verifique a URL e a conexão com o arquivo.")
     
