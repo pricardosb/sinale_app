@@ -55,7 +55,6 @@ def obter_todas_pastas(root_folder_id: str):
 
     pastas = []
     
-    # Obtém nome original da pasta raiz
     try:
         raiz_info = service.files().get(fileId=root_folder_id, fields="id, name").execute()
         pastas.append({"id": raiz_info["id"], "name": raiz_info["name"]})
@@ -199,12 +198,6 @@ def formatar_datas_dataframe(df: pd.DataFrame) -> pd.DataFrame:
                 pass
     return df_copy
 
-def gerar_config_largura_colunas(df: pd.DataFrame, colunas: list) -> dict:
-    config = {}
-    for col in colunas:
-        config[col] = st.column_config.TextColumn(col)
-    return config
-
 
 # =============================================================================
 # MÓDULO PRINCIPAL - PESQUISA PARA REMIÇÃO
@@ -230,7 +223,6 @@ def render_pesquisa_remicao():
         st.error("❌ Parâmetro `pasta_id` ausente no `st.secrets`.")
         return
 
-    # Mapeamento dinâmico de pastas e subpastas
     with st.spinner("Mapeando pastas e subpastas do Google Drive..."):
         lista_pastas = obter_todas_pastas(root_folder_id)
 
@@ -262,8 +254,6 @@ def render_pesquisa_remicao():
         return
 
     folder_ids_selecionados = [mapa_pastas[nome] for nome in pastas_selecionadas_nomes]
-
-    # Lista arquivos das pastas selecionadas
     arquivos_drive = listar_arquivos_das_pastas(folder_ids_selecionados)
 
     if not arquivos_drive:
@@ -300,7 +290,6 @@ def render_pesquisa_remicao():
         st.success("Planilhas carregadas com sucesso! Configure as abas e colunas abaixo:")
 
     if st.session_state.get("executar_config"):
-        # Realiza o download dos arquivos selecionados do Drive para objetos em memória
         uploaded_files = []
         with st.spinner("Baixando planilhas selecionadas do Google Drive..."):
             for nome_chave in arquivos_selecionados_nomes:
@@ -413,7 +402,6 @@ def render_pesquisa_remicao():
 
         btn_consolidar = st.button("🔍 Carregar e Consolidar Dados para Pesquisa", key="btn_consolidar_op3", type="primary")
 
-        # Rolagem suave automática
         if st.session_state.get("rolar_apos_upload"):
             components.html(
                 """
@@ -720,7 +708,7 @@ def render_pesquisa_remicao():
                             rename_map[pos_col] = f"Campo {idx_p+1}"
 
                     cols_exibir = ["MÊS/ANO"] + pos_cols
-                    df_render = df_grupo[cols_exibir].rename(columns=rename_map)
+                    df_render = df_grupo[cols_exibir].rename(columns=rename_map).copy()
 
                     if "REAL" in df_render.columns:
                         df_render["REAL"] = df_render["REAL"].apply(formatar_sem_decimal)
@@ -741,10 +729,21 @@ def render_pesquisa_remicao():
                             st.session_state[key_select] = False
                             st.rerun()
 
+                    # Adiciona coluna de marcação
                     df_render.insert(0, "SELECIONAR?", st.session_state[key_select])
+                    
+                    # Converte explicitamente para tipo Booleano evitando erro de compatibilidade
+                    df_render["SELECIONAR?"] = df_render["SELECIONAR?"].astype(bool)
 
-                    col_config_conteudo = gerar_config_largura_colunas(df_render, df_render.columns.tolist())
-                    col_config_conteudo["SELECIONAR?"] = st.column_config.CheckboxColumn("SELECIONAR?", default=False)
+                    # Converte todas as demais colunas para String segura para evitar falha no st.data_editor
+                    for col in df_render.columns:
+                        if col != "SELECIONAR?":
+                            df_render[col] = df_render[col].fillna("").astype(str)
+
+                    # Configuração limpa e segura de colunas
+                    col_config_conteudo = {
+                        "SELECIONAR?": st.column_config.CheckboxColumn("SELECIONAR?", default=False)
+                    }
 
                     df_editado_res = st.data_editor(
                         df_render,
@@ -790,10 +789,9 @@ def render_pesquisa_remicao():
                                     st.caption(f"⏱️ **Soma total de Horas Realizadas no período selecionado:** {int(round(soma_horas))} h")
 
 
-# Alias para garantir compatibilidade com chamadas no app.py (pesquisa.renderizar())
+# Alias para compatibilidade
 renderizar = render_pesquisa_remicao
 
-# Execução direta se o arquivo for rodado individualmente
 if __name__ == "__main__":
     st.set_page_config(page_title="Pesquisa para Remição", layout="wide")
     render_pesquisa_remicao()
