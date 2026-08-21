@@ -11,12 +11,12 @@ from paginas import inclusao, atualizacoes, pesquisa
 
 st.set_page_config(page_title="SINALE WEB", layout="wide")
 
-# --- BANDEIRA DA BAHIA EM SVG INLINE (MARCA D'ÁGUA DE FUNDO) ---
+# --- BANDEIRA DA BAHIA EM SVG INLINE (MARCA D'ÁGUA) ---
 BAHIA_FLAG_SVG = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 900 600'><rect width='900' height='600' fill='%23ffffff'/><rect y='150' width='900' height='150' fill='%23c8102e'/><rect y='450' width='900' height='150' fill='%23c8102e'/><rect width='300' height='300' fill='%23002b7f'/><polygon points='150,60 225,225 75,225' fill='%23ffffff'/></svg>"
 
 st.markdown(f"""
 <style>
-    /* Mosaico de bandeiras em marca d'água no fundo */
+    /* Marca d'água de fundo */
     .stApp {{
         background-image: linear-gradient(rgba(255, 255, 255, 0.90), rgba(255, 255, 255, 0.90)), 
                           url("{BAHIA_FLAG_SVG}") !important;
@@ -26,12 +26,23 @@ st.markdown(f"""
         background-attachment: fixed !important;
     }}
 
-    /* Transparência nos contêineres internos */
     [data-testid="stAppViewContainer"],
     [data-testid="stHeader"],
     [data-testid="stMain"],
     .main {{
         background: transparent !important;
+    }}
+
+    /* Botão Voltar Fixo/Sticky (Sempre visível abaixo do título durante a rolagem) */
+    .sticky-back-container {{
+        position: sticky;
+        top: 2.8rem;
+        z-index: 999;
+        background-color: rgba(255, 255, 255, 0.95);
+        padding: 10px 0;
+        border-bottom: 2px solid #e5e7eb;
+        margin-bottom: 1.5rem;
+        backdrop-filter: blur(4px);
     }}
 </style>
 """, unsafe_allow_html=True)
@@ -46,15 +57,25 @@ if "fila_modificacoes" not in st.session_state:
 if "pagina" not in st.session_state:
     st.session_state["pagina"] = "menu"
 
-# --- TELA INICIAL (MENU PRINCIPAL E TÍTULO) ---
-if st.session_state["pagina"] == "menu":
-    # Cabeçalho da aplicação (exibido apenas na tela inicial)
-    st.markdown(
-        "<div style='text-align: center; padding: 1.2rem; background-color: #1e3c72; color: white; border-radius: 10px; margin-bottom: 2rem; box-shadow: 0 4px 10px rgba(0,0,0,0.15);'>"
-        "<h1 style='margin:0; font-size: 2.2rem;'>⚡ SINALE WEB</h1><p style='margin:0; opacity: 0.9;'>Sistema de Remição de Pena no Serviço Público</p></div>",
-        unsafe_allow_html=True
-    )
+# --- TÍTULO FIXO NO TOPO DE TODAS AS PÁGINAS ---
+st.markdown(
+    "<div style='text-align: center; padding: 1.2rem; background-color: #1e3c72; color: white; border-radius: 10px; margin-bottom: 1rem; box-shadow: 0 4px 10px rgba(0,0,0,0.15);'>"
+    "<h1 style='margin:0; font-size: 2.2rem;'>⚡ SINALE WEB</h1><p style='margin:0; opacity: 0.9;'>Sistema de Remição de Pena no Serviço Público</p></div>",
+    unsafe_allow_html=True
+)
 
+# --- BOTÃO VOLTAR (ABAIXO DO TÍTULO E STICKY/VISÍVEL AO ROLAR) ---
+if st.session_state["pagina"] != "menu":
+    st.markdown('<div class="sticky-back-container">', unsafe_allow_html=True)
+    col_back, _ = st.columns([1, 4])
+    with col_back:
+        if st.button("⬅️ VOLTAR AO MENU", use_container_width=True):
+            st.session_state["pagina"] = "menu"
+            st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# --- ROTEAMENTO DE PÁGINAS ---
+if st.session_state["pagina"] == "menu":
     col1, col2, col3 = st.columns(3)
     
     with col1:
@@ -88,20 +109,11 @@ if st.session_state["pagina"] == "menu":
             st.session_state["pagina"] = "menu"
             st.rerun()
 
-# --- PÁGINAS INTERNAS (EXIBE APENAS A PÁGINA SELECIONADA E O BOTÃO VOLTAR) ---
-else:
-    col_back, _ = st.columns([1, 4])
-    with col_back:
-        if st.button("⬅️ VOLTAR AO MENU", use_container_width=True):
-            st.session_state["pagina"] = "menu"
-            st.rerun()
-    st.markdown("---")
+elif st.session_state["pagina"] == "inclusao":
+    inclusao.renderizar()
 
-    if st.session_state["pagina"] == "inclusao":
-        inclusao.renderizar()
+elif st.session_state["pagina"] == "atualizacoes":
+    atualizacoes.renderizar()
 
-    elif st.session_state["pagina"] == "atualizacoes":
-        atualizacoes.renderizar()
-
-    elif st.session_state["pagina"] == "pesquisa":
-        pesquisa.renderizar()
+elif st.session_state["pagina"] == "pesquisa":
+    pesquisa.renderizar()
