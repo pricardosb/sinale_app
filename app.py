@@ -11,18 +11,18 @@ from paginas import inclusao, atualizacoes, pesquisa
 
 st.set_page_config(page_title="SINALE WEB", layout="wide")
 
-# --- BANDEIRA DA BAHIA EM SVG INLINE (PADRÃO REPETIDO E COM REALCE) ---
+# --- BANDEIRA DA BAHIA EM SVG INLINE (MAIOR E MAIS SUAVE) ---
 BAHIA_FLAG_SVG = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 900 600'><rect width='900' height='600' fill='%23ffffff'/><rect y='150' width='900' height='150' fill='%23c8102e'/><rect y='450' width='900' height='150' fill='%23c8102e'/><rect width='300' height='300' fill='%23002b7f'/><polygon points='150,60 225,225 75,225' fill='%23ffffff'/></svg>"
 
 st.markdown(f"""
 <style>
-    /* Aplica o mosaico de bandeiras no fundo geral */
+    /* Mosaico de bandeiras maiores com realce reduzido (marca d'água suave) */
     .stApp {{
-        background-image: linear-gradient(rgba(255, 255, 255, 0.70), rgba(255, 255, 255, 0.70)), 
+        background-image: linear-gradient(rgba(255, 255, 255, 0.90), rgba(255, 255, 255, 0.90)), 
                           url("{BAHIA_FLAG_SVG}") !important;
         background-repeat: repeat !important;
         background-position: top left !important;
-        background-size: 180px 120px !important; /* Tamanho menor das bandeiras */
+        background-size: 300px 200px !important;
         background-attachment: fixed !important;
     }}
 
