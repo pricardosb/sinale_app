@@ -11,12 +11,12 @@ from paginas import inclusao, atualizacoes, pesquisa
 
 st.set_page_config(page_title="SINALE WEB", layout="wide")
 
-# --- BANDEIRA DA BAHIA EM SVG INLINE (MARCA D'ÁGUA) ---
+# --- BANDEIRA DA BAHIA EM SVG INLINE (MARCA D'ÁGUA DE FUNDO) ---
 BAHIA_FLAG_SVG = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 900 600'><rect width='900' height='600' fill='%23ffffff'/><rect y='150' width='900' height='150' fill='%23c8102e'/><rect y='450' width='900' height='150' fill='%23c8102e'/><rect width='300' height='300' fill='%23002b7f'/><polygon points='150,60 225,225 75,225' fill='%23ffffff'/></svg>"
 
 st.markdown(f"""
 <style>
-    /* Marca d'água de fundo em toda a aplicação */
+    /* Marca d'água de fundo */
     .stApp {{
         background-image: linear-gradient(rgba(255, 255, 255, 0.90), rgba(255, 255, 255, 0.90)), 
                           url("{BAHIA_FLAG_SVG}") !important;
@@ -33,25 +33,27 @@ st.markdown(f"""
         background: transparent !important;
     }}
 
-    /* REGRA CSS PARA FORÇAR O BOTÃO VOLTAR A FLUTUAR NA TELA */
-    div.element-container:has(.btn-flutuante-anchor) + div.element-container button {{
-        position: fixed !important;
-        top: 20px !important;
-        right: 30px !important;
-        z-index: 999999 !important;
-        background-color: #CE1126 !important;
-        color: #FFFFFF !important;
-        border: 2px solid #FFFFFF !important;
-        border-radius: 20px !important;
-        padding: 0.6rem 1.4rem !important;
-        font-weight: bold !important;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.3) !important;
-        cursor: pointer !important;
+    /* PADRÃO DE BOTÕES (BORDA VERMELHA COM TRANSIÇÃO PARA AZUL NO HOVER) */
+    div.stButton > button {{
+        width: 100% !important;
+        height: 52px !important;
+        border-radius: 8px !important;
+        border: 2px solid #CE1126 !important;
+        background-color: #FFFFFF !important;
+        color: #CE1126 !important;
+        font-weight: 700 !important;
+        font-size: 15px !important;
+        letter-spacing: 0.5px !important;
+        transition: all 0.25s ease-in-out !important;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08) !important;
     }}
 
-    div.element-container:has(.btn-flutuante-anchor) + div.element-container button:hover {{
+    div.stButton > button:hover {{
         background-color: #002B7F !important;
-        transform: scale(1.05) !important;
+        border-color: #002B7F !important;
+        color: #FFFFFF !important;
+        transform: translateY(-2px) !important;
+        box-shadow: 0 6px 16px rgba(0, 43, 127, 0.25) !important;
     }}
 </style>
 """, unsafe_allow_html=True)
@@ -107,15 +109,15 @@ if st.session_state["pagina"] == "menu":
             st.session_state["pagina"] = "menu"
             st.rerun()
 
-# --- PÁGINAS INTERNAS (TELA LIMPA + BOTÃO FLUTUANTE PERMANENTE) ---
+# --- PÁGINAS INTERNAS (O BOTÃO SEGUIRÁ O FLUXO DA PÁGINA) ---
 else:
-    # Âncora CSS + Botão que é renderizado com posição FIXA (fixed) na janela
-    st.markdown('<div class="btn-flutuante-anchor"></div>', unsafe_allow_html=True)
-    if st.button("⬅️ VOLTAR AO MENU", key="btn_voltar_flutuante"):
-        st.session_state["pagina"] = "menu"
-        st.rerun()
+    col_back, _ = st.columns([1, 4])
+    with col_back:
+        if st.button("⬅️ VOLTAR AO MENU", key="btn_voltar_menu", use_container_width=True):
+            st.session_state["pagina"] = "menu"
+            st.rerun()
+    st.markdown("---")
 
-    # Exibição exclusiva do módulo selecionado
     if st.session_state["pagina"] == "inclusao":
         inclusao.renderizar()
 
