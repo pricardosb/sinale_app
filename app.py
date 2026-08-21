@@ -11,13 +11,24 @@ from paginas import inclusao, atualizacoes, pesquisa
 
 st.set_page_config(page_title="SINALE WEB", layout="wide")
 
-# --- BANDEIRA DA BAHIA AO FUNDO (MARCA D'ÁGUA SUAVE) ---
+# --- BANDEIRA DA BAHIA EM TODA A TELA ---
 st.markdown("""
 <style>
-    [data-testid="stAppViewContainer"] {
-        background: linear-gradient(rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.88)), 
+    /* Aplica o fundo na raiz absoluta da aplicação */
+    .stApp {
+        background: linear-gradient(rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.85)), 
                     url("https://upload.wikimedia.org/wikipedia/commons/2/28/Bandeira_do_Estado_da_Bahia.svg") no-repeat center center fixed !important;
         background-size: cover !important;
+    }
+
+    /* Remove a opacidade/fundo branco das camadas internas do Streamlit */
+    [data-testid="stAppViewContainer"],
+    [data-testid="stHeader"],
+    [data-testid="stMain"],
+    .main,
+    section.main {
+        background: transparent !important;
+        background-color: transparent !important;
     }
 </style>
 """, unsafe_allow_html=True)
