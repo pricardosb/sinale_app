@@ -50,7 +50,7 @@ def carregar_dados_web(file_id):
 # -----------------------------------------------------------------------------
 # 3. FUNÇÃO PRINCIPAL DE RENDERIZAÇÃO DA TELA
 # -----------------------------------------------------------------------------
-def render_pesquisa_remicao():
+def renderizar():
     st.subheader("🔍 Pesquisa para Remição")
     
     # Busca os arquivos da pasta na nuvem
